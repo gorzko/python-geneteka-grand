@@ -62,7 +62,8 @@ def extractIcons(cell):
 
 def extractLinks(cell):
   """Returns [(href, inner_html), ...] for all links in a cell."""
-  return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(cell or '')]
+  return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(cell or ''
+)]
 
 
 def extractScans(cell):
@@ -85,8 +86,10 @@ def extractStuff(stuff):
     output['notes'] = comments
   if archives:
     output['archives'] = '\r'.join(archives)
-  if scans:
-    output['archives_url'] = scans[0]
+  # URL to the place the archives are kept (a tag with a target attribute).
+  match = re.search(r'href="([^"]*)"[^>]*target', stuff or '')
+  if match:
+    output['archives_url'] = html.unescape(match.group(1))
   scanUrls = extractScans(stuff)
   if scanUrls:
     output['scan_urls'] = scanUrls
@@ -131,7 +134,8 @@ def convertPersonRecord(record):
   if motherLastNameNotes:
     output['mother_last_name_notes'] = motherLastNameNotes
 
-  # [i] comments from every column, not just the "stuff" column.
+  # [i] comments from every column, not just the "stuff" co
+lumn.
   allComments = []
   for cell in record:
     comments, _, _ = extractIcons(cell)
@@ -203,7 +207,8 @@ def extractNotes(value):
 
 def main():
   # Map from prefix to list of records.
-  data = defaultdict(list)
+  data = defaultdict(li
+st)
 
   # Read all files from INPUT_DIR.
   for fileName in os.listdir(INPUT_DIR):
