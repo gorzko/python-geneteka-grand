@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 """
-Fetches data from the Geneteka database (http://www.geneteka.genealodzy.pl).
+Fetches data from the Geneteka database (https://geneteka.genealodzy.pl).
 
 Supports all search filters available in the Geneteka GUI. The GUI form on
 index.php?op=gt sends its whole query string unchanged to api/getAct.php
@@ -14,7 +14,7 @@ GUI filter is just a GET parameter:
   lang            - pol / eng
   search_lastname - surname of the searched person
   search_name     - given name(s) of the searched person
-  search_lastname2 - second surname (mother's surname for B/D, spouse for S)
+  search_lastname2 - second surname (mother's for B/D, spouse for S)
   search_name2    - second given name(s)
   from_date       - year range start
   to_date         - year range end
@@ -23,25 +23,31 @@ GUI filter is just a GET parameter:
   parents=1       - also search by parents' names
   near=1          - also search in nearby parishes
 
-For convenience you can paste a full GUI search URL with --url and all
-filters will be extracted from it.
+API quirk: getAct.php only returns complete, correctly paginated pages of
+the right record type when a name/surname filter is active. Without such a
+filter the server truncates pages to a handful of rows, ignores pagination
+and may mix record types, and the parents columns are empty. Whole-parish
+downloads therefore work in two passes: pass 1 enumerates the surnames in
+the parish, pass 2 fetches each surname with search_lastname (complete
+pages, correct type, parents included).
 
-The raw JSON responses are saved unmodified, so every column the API
-returns (including the "stuff" column with [i] tooltips, archive info and
-scan links) is preserved for merge.py to parse.
+The raw JSON responses of pass 2 are saved unmodified, so every column
+the API returns (including the "stuff" column with [i] tooltips, archive
+info and scan links) is preserved for merge.py to parse.
 """
 
 import argparse
 import hashlib
 import math
 import os
+import re
 import sys
 import time
 import urllib.parse
 
 import requests
 
-BASE_URL = 'http://www.geneteka.genealodzy.pl'
+BASE_URL = 'https://geneteka.genealodzy.pl'
 ACTS_URL = BASE_URL + '/api/getAct.php'
 INDEX_URL = BASE_URL + '/index.php'
 OUTPUT_DIR = 'data_raw'
@@ -56,9 +62,6 @@ FILTER_PARAMS = (
     'from_date', 'to_date',
     'exac', 'pair', 'parents', 'near',
 )
-
-# Internal Datatables parameters (pagination / sorting / search state).
-TABLE_PARAMS = ('rpp1', 'rpp2', 'ordertable', 'searchtable', 'start', 'length')
 
 
 def filtersFromUrl(url):
@@ -188,12 +191,120 @@ def fetchPage(session, filters, start, length):
       response = session.get(ACTS_URL, params=params, headers=headers,
                              timeout=30)
       response.raise_for_status()
+      # The server sometimes answers 200 with an empty (non-JSON) body,
+      # e.g. when throttling; treat that as a failed attempt and retry.
+      response.json()
       return response
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError) as e:
       lastError = e
       if attempt + 1 < MAX_RETRIES:
         time.sleep(5 * (attempt + 1))
   raise lastError
+
+
+def stripCellHtml(value):
+  """Returns the cell text with any icon/tooltip HTML removed."""
+  text = str(value)
+  text = re.sub(r'<img\b[^>]*>', '', text)
+  text = re.sub(r'<[^>]+>', '', text)
+  return text.strip()
+
+
+def recordKey(row):
+  """Identity of a raw record: year, number, names and surnames."""
+  return tuple(str(row[i]).strip() if i < len(row) else '' for i in range(8))
+
+
+def fetchPaged(session, filters, prefix, pageCounter):
+  """Fetches all pages of one filtered query, saving each response 1:1.
+
+  pageCounter is a one-element list holding the next data_raw file number,
+  shared across per-surname queries. Returns the merged rows.
+  """
+  result = None
+  start = 0
+  totalPages = None
+  emptyWarned = False
+  while True:
+    print('Fetching {} page {}/{}'.format(
+        os.path.basename(prefix), start // PAGE_SIZE + 1,
+        totalPages if totalPages else '?'))
+    response = fetchPage(session, filters, start, PAGE_SIZE)
+    fileName = '{}_{:05d}.json'.format(prefix, pageCounter[0])
+    with open(fileName, 'w') as f:
+      f.write(response.text)
+    pageCounter[0] += 1
+    data = response.json()
+    rows = data.get('data', [])
+    if not rows:
+      # The API sometimes returns an empty page together with
+      # recordsTotal > 0 (server-side glitch). Retry the page before
+      # giving up, so we do not silently save an empty data_raw file.
+      if start == 0 and not emptyWarned:
+        emptyWarned = True
+        totalCheck = int(data.get('recordsTotal', 0))
+        if totalCheck > 0:
+          print('Warning: API reported {} records but returned an empty '
+                'page; retrying...'.format(totalCheck))
+          time.sleep(5)
+          response = fetchPage(session, filters, start, PAGE_SIZE)
+          with open(fileName, 'w') as f:
+            f.write(response.text)
+          data = response.json()
+          rows = data.get('data', [])
+          if not rows:
+            print('Warning: retry also returned an empty page.')
+      else:
+        print('Warning: page at start={} returned no rows.'.format(start))
+    if result is None:
+      result = data
+      total = int(data.get('recordsTotal', 0))
+      totalPages = max(1, int(math.ceil(1.0 * total / PAGE_SIZE)))
+      if total == 0:
+        print('No records found.')
+        return []
+    else:
+      result['data'].extend(rows)
+    start += PAGE_SIZE
+    if start >= totalPages * PAGE_SIZE:
+      break
+    # Sleep not to overload the server with continuous load.
+    time.sleep(SLEEP_SECONDS)
+  return result['data']
+
+
+def enumerateSurnames(session, filters):
+  """Pass 1: collects unique surnames from an unfiltered query.
+
+  Unfiltered responses may be truncated and may mix record types, so they
+  are only used to enumerate surnames and are NOT saved to data_raw.
+  """
+  surnames = []
+  seen = set()
+  start = 0
+  totalPages = None
+  while True:
+    response = fetchPage(session, filters, start, PAGE_SIZE)
+    data = response.json()
+    rows = data.get('data', [])
+    if totalPages is None:
+      total = int(data.get('recordsTotal', 0))
+      totalPages = max(1, int(math.ceil(1.0 * total / PAGE_SIZE)))
+      if total == 0:
+        break
+    for row in rows:
+      for index in (3, 6):
+        if index >= len(row):
+          continue
+        surname = stripCellHtml(row[index])
+        if surname and surname not in seen:
+          seen.add(surname)
+          surnames.append(surname)
+    start += PAGE_SIZE
+    if start >= totalPages * PAGE_SIZE:
+      break
+    time.sleep(SLEEP_SECONDS)
+  return surnames
 
 
 def fetchAll(filters, outputDir):
@@ -205,57 +316,32 @@ def fetchAll(filters, outputDir):
   session.get(INDEX_URL, params={k: v for k, v in filters.items()},
               timeout=30, headers={'User-Agent': 'python-geneteka/2.0'})
 
-  length = PAGE_SIZE
-  page = 0
-  result = None
-  totalPages = None
-  emptyWarned = False
-  while True:
-    print('Fetching {} page {}/{}'.format(
-        os.path.basename(prefix), page + 1,
-        totalPages if totalPages else '?'))
-    response = fetchPage(session, filters, page * length, length)
-    fileName = '{}_{:05d}.json'.format(prefix, page)
-    with open(fileName, 'w') as f:
-      f.write(response.text)
-    data = response.json()
-    rows = data.get('data', [])
-    if not rows:
-      # The API sometimes returns an empty page together with
-      # recordsTotal > 0 (server-side glitch). Retry the page before
-      # giving up, so we do not silently save an empty data_raw file.
-      if page == 0 and not emptyWarned:
-        emptyWarned = True
-        totalCheck = int(data.get('recordsTotal', 0))
-        if totalCheck > 0:
-          print('Warning: API reported {} records but returned an empty '
-                'page; retrying...'.format(totalCheck))
-          time.sleep(5)
-          response = fetchPage(session, filters, page * length, length)
-          with open(fileName, 'w') as f:
-            f.write(response.text)
-          data = response.json()
-          rows = data.get('data', [])
-          if not rows:
-            print('Warning: retry also returned an empty page.')
-      elif page > 0:
-        # Last page may legitimately be partial but never fully empty.
-        print('Warning: page {} returned no rows.'.format(page + 1))
-    if result is None:
-      result = data
-      total = int(data.get('recordsTotal', 0))
-      totalPages = max(1, int(math.ceil(1.0 * total / length)))
-      if total == 0:
-        print('No records found.')
-        return []
-    else:
-      result['data'].extend(data.get('data', []))
-    page += 1
-    if page >= totalPages:
-      break
-    # Sleep not to overload the server with continuous load.
-    time.sleep(SLEEP_SECONDS)
-  return result['data']
+  # Without a name/surname filter the API truncates pages, ignores
+  # pagination and returns no parents, so whole-parish downloads are
+  # fetched per surname (pass 1 enumerates them, pass 2 fetches them).
+  if not (filters.get('search_lastname') or filters.get('search_name')):
+    print('No name/surname filter: enumerating surnames (pass 1)...')
+    surnames = enumerateSurnames(session, filters)
+    print('Found {} unique surnames; fetching each (pass 2)...'.format(
+        len(surnames)))
+    pageCounter = [0]
+    allRows = []
+    seenKeys = set()
+    for surname in surnames:
+      subFilters = dict(filters)
+      subFilters['search_lastname'] = surname
+      rows = fetchPaged(session, subFilters, prefix, pageCounter)
+      for row in rows:
+        key = recordKey(row)
+        if key in seenKeys:
+          continue
+        seenKeys.add(key)
+        allRows.append(row)
+      time.sleep(SLEEP_SECONDS)
+    return allRows
+
+  pageCounter = [0]
+  return fetchPaged(session, filters, prefix, pageCounter)
 
 
 def main():
