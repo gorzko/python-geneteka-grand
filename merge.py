@@ -48,6 +48,17 @@ def imgField(tag, field):
   return match.group(1) if match else ''
 
 
+def extractIconTitles(cell, iconName):
+  """Returns the unescaped, non-empty titles of the given icon in a cell."""
+  titles = []
+  for tag in IMG_TAG_RE.findall(asText(cell)):
+    if os.path.basename(imgField(tag, 'src')) == iconName:
+      title = unescape(imgField(tag, 'title'))
+      if title:
+        titles.append(title)
+  return titles
+
+
 def extractComments(cell):
   """Extracts comments from [i]-icon tooltips in any table cell.
 
@@ -55,11 +66,9 @@ def extractComments(cell):
   (encoded as &#013; in the HTML, decoded by html.unescape).
   """
   comments = []
-  for tag in IMG_TAG_RE.findall(asText(cell)):
-    if os.path.basename(imgField(tag, 'src')) == 'i.png':
-      title = unescape(imgField(tag, 'title'))
-      comments.extend(
-          part.strip() for part in title.split('\r') if part.strip())
+  for title in extractIconTitles(cell, 'i.png'):
+    comments.extend(
+        part.strip() for part in title.split('\r') if part.strip())
   return comments
 
 
@@ -90,6 +99,10 @@ def extractStuff(stuff):
   (e.g. an archive without a website, or a record without a scan).
   """
   output = {}
+  # Place where the registers are kept ([z] icon tooltip).
+  archiveTitles = extractIconTitles(stuff, 'z.png')
+  if archiveTitles:
+    output['archives'] = '\r'.join(archiveTitles)
   archiveUrls = extractUrlsAround(stuff, r'z\.png')
   if archiveUrls:
     output['archives_url'] = archiveUrls[0]
@@ -104,7 +117,11 @@ def extractStuff(stuff):
 
 
 def extractNotes(value):
-  """Splits a cell into (text, note) using the [i] icon tooltip."""
+  """Splits a cell into (text, note) using the [i] icon tooltip.
+
+  The note text itself is also picked up by extractComments (comments are
+  collected from every column), so it is not emitted as a separate key.
+  """
   value = asText(value)
   match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
   if match:
@@ -118,8 +135,8 @@ def convertPersonRecord(record):
     return asText(record[index]) if index < len(record) else ''
 
   stuff = col(9)
-  lastName, lastNameNotes = extractNotes(col(3))
-  motherLastName, motherLastNameNotes = extractNotes(col(6))
+  lastName, _ = extractNotes(col(3))
+  motherLastName, _ = extractNotes(col(6))
 
   output = {
       'year': col(0).strip(),
@@ -132,12 +149,6 @@ def convertPersonRecord(record):
       'parish': col(7).strip(),
       'place': col(8).strip(),
   }
-
-  # Notes attached to surname cells.
-  if lastNameNotes:
-    output['last_name_notes'] = lastNameNotes
-  if motherLastNameNotes:
-    output['mother_last_name_notes'] = motherLastNameNotes
 
   # Comments from every column, deduplicated, in order of appearance.
   allComments = []
@@ -159,8 +170,8 @@ def convertMarriageRecord(record):
     return asText(record[index]) if index < len(record) else ''
 
   stuff = col(9)
-  husbandLastName, husbandLastNameNotes = extractNotes(col(3))
-  wifeLastName, wifeLastNameNotes = extractNotes(col(6))
+  husbandLastName, _ = extractNotes(col(3))
+  wifeLastName, _ = extractNotes(col(6))
 
   output = {
       'year': col(0).strip(),
@@ -173,11 +184,6 @@ def convertMarriageRecord(record):
       'wife_parents': col(7).strip(),
       'parish': col(8).strip(),
   }
-
-  if husbandLastNameNotes:
-    output['nazwisko_meza_uwagi'] = husbandLastNameNotes
-  if wifeLastNameNotes:
-    output['nazwisko_zony_uwagi'] = wifeLastNameNotes
 
   # Comments from every column, deduplicated, in order of appearance.
   allComments = []
