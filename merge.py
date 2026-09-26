@@ -7,14 +7,17 @@ Converts every raw row (a JSON array with HTML snippets) into a dict
 with named fields. The last "stuff" column is fully parsed into:
 
 - comments/notes       - [i]-icon tooltips from any column (split by \r)
-- archives             - [z]-icon tooltip ("Miejsce przechowywania ksiąg")
+- archives             - [z]-icon tooltip ("Miejsce przechowywania ksiag")
 - archives_url         - href of the <a> wrapping z.png (absent if no link)
 - scan_urls/scan_url   - href(s) of the <a> wrapping s.png (absent if no scan)
-- user_entered         - uname from the [a]-icon link ("Indeks dodał")
+- user_entered         - uname from the [a]-icon link ("Indeks dodal")
 
 The unparsed original row is preserved in "raw_columns".
 Keeps the original output keys (notes, archives, archives_url,
 metryki_url, last_name_notes, ...) so generate.py works unchanged.
+
+Every cell is coerced to str via asText() before any parsing, because
+the API may return non-string values (e.g. the year as an int).
 """
 
 from collections import defaultdict
@@ -66,8 +69,7 @@ def extractIcons(cell):
     elif base == 'z.png' and title:
       archives.append(title)
     elif base == 's.png':
-   
-   scans.append(title)
+      scans.append(title)
   return comments, archives, scans
 
 
@@ -127,8 +129,7 @@ def extractStuff(stuff):
 def convertPersonRecord(record):
   """Converts a raw birth/death row into a structured dict."""
   # Keep everything the API returned, unparsed.
-  ra
-w = list(record)
+  raw = list(record)
 
   def col(index):
     return asText(record[index]) if index < len(record) else ''
@@ -163,8 +164,7 @@ w = list(record)
     allComments.extend(comments)
   if allComments:
     seen = set()
-    deduped = [c for c in allComments
-               if not (c in seen or seen.add(c))]
+    deduped = [c for c in allComments if not (c in seen or seen.add(c))]
     output['comments'] = deduped
     output.setdefault('notes', deduped)
 
@@ -191,8 +191,7 @@ def convertMarriageRecord(record):
     'husband_first_name': col(2).strip(),
     'husband_last_name': husbandLastName,
     'husband_parents': col(4).strip(),
-    'wife_first_name': col(5)
-.strip(),
+    'wife_first_name': col(5).strip(),
     'wife_last_name': wifeLastName,
     'wife_parents': col(7).strip(),
     'parish': col(8).strip(),
@@ -211,8 +210,7 @@ def convertMarriageRecord(record):
     allComments.extend(comments)
   if allComments:
     seen = set()
-    deduped = [c for c in allComments
-               if not (c in seen or seen.add(c))]
+    deduped = [c for c in allComments if not (c in seen or seen.add(c))]
     output['comments'] = deduped
     output.setdefault('notes', deduped)
 
@@ -261,8 +259,7 @@ def main():
     metadata = {
       'voivodeship': voivodeship,
       'record_type': recordType,
- 
-     'parish_id': parishId,
+      'parish_id': parishId,
     }
     outputFile = os.path.join(OUTPUT_DIR, key + '.json')
     with open(outputFile, 'w') as file:
