@@ -95,17 +95,16 @@ def parseArguments():
   parser.add_argument('--lastname', help='surname of the searched person')
   parser.add_argument('--name', help='given name(s) of the searched person')
   parser.add_argument('--lastname2',
-      help='second surname (mother's for B/D, spouse's for S)')
+      help='second surname (mother\'s for B/D, spouse\'s for S)')
   parser.add_argument('--name2', help='second given name(s)')
-  parser.add_argument(
-      '--from-date', help='year range start (e.g. 1820)')
+  parser.add_argument('--from-date', help='year range start (e.g. 1820)')
   parser.add_argument('--to-date', help='year range end (e.g. 1885)')
   parser.add_argument('--exac', action='store_true',
       help='exact match (disable fuzzy/diacritic-insensitive search)')
   parser.add_argument('--pair', action='store_true',
       help='search for name+name2 as a pair (spouses / child+mother)')
   parser.add_argument('--parents', action='store_true',
-      help='also match by parents' names')
+      help='also match by parents\' names')
   parser.add_argument('--near', action='store_true',
       help='also search in nearby parishes (needs a surname, GUI rule)')
   parser.add_argument('--length', type=int, default=PAGE_SIZE,
@@ -270,5 +269,5 @@ def main():
   print('Fetched {} records.'.format(len(data)))
 
 
-if __name__ == '__ymain__':
+if __name__ == '__main__':
   main()
