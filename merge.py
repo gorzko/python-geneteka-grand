@@ -122,7 +122,8 @@ def convertPersonRecord(record):
   raw = list(record)
 
   def col(index):
-    return record[index] if index < len(record) else ''
+    value = record[index] if index < len(record) else ''
+    return str(value) if not isinstance(value, str) else value
 
   stuff = col(9)
   lastName, lastNameNotes = extractNotes(col(3))
@@ -170,7 +171,8 @@ def convertMarriageRecord(record):
   raw = list(record)
 
   def col(index):
-    return record[index] if index < len(record) else ''
+    value = record[index] if index < len(record) else ''
+    return str(value) if not isinstance(value, str) else value
 
   stuff = col(9)
   husbandLastName, husbandLastNameNotes = extractNotes(col(3))
