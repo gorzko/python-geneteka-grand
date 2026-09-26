@@ -57,7 +57,8 @@ Jeśli użyto filtrów wyszukiwania, nazwa pliku zawiera dodatkowy
 python merge.py
 ```
 
-merge.py parsuje teraz wszystkie kolumny każdego wiersza:
+merge.py parsuje teraz ws
+zystkie kolumny każdego wiersza:
 - uwagi z ikon [i] w dowolnej kolumnie (`comments`/`notes`),
 - informację o archiwum i link do archiwum (`archives`, `archives_url`),
 - odnośnik do skanu, jeśli jest dostępny (`scan_urls`/`metryki_url`),
@@ -69,3 +70,18 @@ merge.py parsuje teraz wszystkie kolumny każdego wiersza:
 ```
 python generate.py
 ```
+
+## Klucze danych w merge.py (kolumna "Uwagi")
+
+Rekordy w `data/*.json` zawierają następujące pola wyciągane z ikon w kolumnie "Uwagi":
+
+| Klucz | Źródło | Obecność |
+|---|---|---|
+| `comments` / `notes` | `title` ikony `i.png` (wszystkie kolumny, podział po \r) | gdy są uwagi |
+| `archives` | `title` ikony `z.png` | gdy podano miejsce przechowywania |
+| `archives_url` | `href` linku otaczającego `z.png` | gdy archiwum ma stronę WWW |
+| `scan_urls` / `scan_url` / `metryki_url` | `href` linku otaczającego `s.png` | gdy dostępny jest skan |
+| `user_entered` | parametr `uname=` w linku przy `a.png` | gdy podano indeksującego |
+
+Klucze `archives_url` i `scan_url` są **całkowicie pomijane**, gdy dany rekord nie ma
+odpowiedniego linku (np. archiwum parafialne bez strony WWW) — zamiast fałszywych wartości.
