@@ -51,6 +51,31 @@ o archiwum (z.png) i odnośnikiem do skanu (s.png → metryki.genealodzy.pl).
 Jeśli użyto filtrów wyszukiwania, nazwa pliku zawiera dodatkowy
 8-znakowy znacznik zapytania, więc wyniki różnych kwerend nie mieszają się.
 
+### Pobieranie całej parafii (dwuprzebiegowe)
+
+API `getAct.php` zwraca kompletne, poprawnie stronicowane strony z rodzicami
+**tylko wtedy, gdy aktywny jest filtr imienia lub nazwiska**. Bez filtra
+serwer ucina strony do kilku wierszy, ignoruje paginację i pomija kolumny
+rodziców. Dlatego kwerenda całej parafii (bez `search_lastname`/
+`search_name`) działa dwuprzebiegowo:
+
+1. **Przebieg 1** — enumeracja nazwisk w parafii (niezapisywane do
+   `data_raw`, bo odpowiedzi bez filtra mogą mieszać księgi);
+2. **Przebieg 2** — pobranie każdego nazwiska z `search_lastname`
+   (kompletne strony, rodzice uwzględnieni), zapis 1:1 do `data_raw`.
+
+Ten sam rekord może więc trafić do kilku plików `data_raw`; `merge.py`
+deduplikuje wiersze po kluczu rekordu, zachowując wersję z największą
+liczbą wypełnionych kolumn (tę z rodzicami).
+
+Znane ograniczenia API (obsługiwane automatycznie):
+- sporadycznie zwracana jest pusta strona mimo `recordsTotal > 0` — strona
+  jest wtedy ponawiana;
+- po serii szybkich zapytań serwer chwilowo throttluje (puste odpowiedzi
+  200) — fetch.py czeka i ponawia zapytanie;
+- dla małych parafii pewność kompletności daje też pobranie wąskich
+  zakresów rocznych (`from_date`/`to_date`).
+
 2. Wstępnie przetworzenie danych
 
 ```
@@ -61,7 +86,9 @@ merge.py parsuje wszystkie kolumny każdego wiersza:
 - uwagi z ikon [i] w dowolnej kolumnie (`comments`),
 - informację o archiwum i link do archiwum (`archives`, `archives_url`),
 - odnośnik do skanu, jeśli jest dostępny (`scan_url`),
-- użytkownika, który zaindeksował akt (`user_entered`).
+- użytkownika, który zaindeksował akt (`user_entered`),
+- deduplikację wierszy (ten sam akt z różnych kwerend → jeden rekord,
+  preferowana wersja z rodzicami).
 
 3. Wygenerowanie plików HTML
 
