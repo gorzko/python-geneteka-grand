@@ -63,6 +63,7 @@ def extractIcons(cell):
 def extractLinks(cell):
   """Returns [(href, inner_html), ...] for all links in a cell."""
   return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(cell or ''
+
 )]
 
 
@@ -71,6 +72,19 @@ def extractScans(cell):
   urls = []
   for href, inner in extractLinks(cell):
     if re.search(r's\.png', inner):
+      urls.append(href)
+  return urls
+
+
+def extractUrlsAround(cell, iconRe):
+  """Returns hrefs of <a> tags whose inner HTML contains the given icon.
+
+  Used to get the URL wrapped around z.png (archive website) and s.png
+  (scan). Returns [] when no such link exists.
+  """
+  urls = []
+  for href, inner in extractLinks(cell):
+    if re.search(iconRe, inner):
       urls.append(href)
   return urls
 
@@ -86,13 +100,17 @@ def extractStuff(stuff):
     output['notes'] = comments
   if archives:
     output['archives'] = '\r'.join(archives)
-  # URL to the place the archives are kept (a tag with a target attribute).
-  match = re.search(r'href="([^"]*)"[^>]*target', stuff or '')
-  if match:
-    output['archives_url'] = html.unescape(match.group(1))
+  # URL of the place where the archives are kept: the <a> tag that
+  # wraps the z.png icon (only present when the archive has a website).
+  archiveUrls = extractUrlsAround(stuff, r'z\.png')
+  if archiveUrls:
+    output['archives_url'] = archiveUrls[0]
+  # URL(s) of the scan: the <a> tag that wraps the s.png icon
+  # (only present when a scan is available).
   scanUrls = extractScans(stuff)
   if scanUrls:
     output['scan_urls'] = scanUrls
+    output['scan_url'] = scanUrls[0]
     # Backward-compatible key used by generate.py.
     output['metryki_url'] = scanUrls[0]
   # User that entered this record to the database.
@@ -130,7 +148,8 @@ def convertPersonRecord(record):
 
   # Notes attached to surname cells.
   if lastNameNotes:
-    output['last_name_notes'] = lastNameNotes
+    output['last_name_notes'] 
+= lastNameNotes
   if motherLastNameNotes:
     output['mother_last_name_notes'] = motherLastNameNotes
 
@@ -201,7 +220,8 @@ def extractNotes(value):
   """Splits a cell into (text, note) using the [i] icon tooltip."""
   match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
   if match:
-    return (value.split('<', 1)[0].strip(), unescape(match.group(1)))
+    return (valu
+e.split('<', 1)[0].strip(), unescape(match.group(1)))
   return (value.strip(), None)
 
 
