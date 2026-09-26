@@ -84,7 +84,7 @@ def extractUrlsAround(cell, iconRe):
 
   Used to get the URL wrapped around z.png (archive website) and s.png
   (scan). Returns [] when no such link exists.
-  ""
+  """
   urls = []
   for href, inner in extractLinks(cell):
     if re.search(iconRe, inner):
@@ -97,7 +97,7 @@ def extractStuff(stuff):
 
   Keys are simply omitted when the corresponding information is absent
   (e.g. an archive without a website, or a record without a scan).
-  ""
+  """
   output = {}
   # Place where the registers are kept ([z] icon tooltip).
   archiveTitles = extractIconTitles(stuff, 'z.png')
@@ -124,7 +124,6 @@ def extractNotes(value):
   """
   value = asText(value)
   match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
-  match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
   if match:
     return (value.split('<', 1)[0].strip(), unescape(match.group(1)))
   return (value.strip(), None)
@@ -137,7 +136,7 @@ def convertPersonRecord(record):
 
   stuff = col(9)
   lastName, _ = extractNotes(col(3))
-  motherLastName, _ = extactNotes(col(6))
+  motherLastName, _ = extractNotes(col(6))
 
   output = {
       'year': col(0).strip(),
@@ -217,7 +216,7 @@ def dedupRows(rows):
   stores every API response 1:1 in data_raw, so the same record can
   appear in several files. When merging, we keep the row with the most
   filled columns (the one that has the parents).
-  ""
+  """
   best = {}
   for row in rows:
     key = recordKey(row)
