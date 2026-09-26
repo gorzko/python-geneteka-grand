@@ -3,16 +3,18 @@
 """
 Merges raw data from geneteka into larger json files.
 
-Parses all columns of the raw table rows, including:
-- all [i]-icon tooltips (comments) from any column,
-- archive information (z.png tooltips and the link wrapping z.png),
-- scan links (the <a> tag wrapping the s.png icon),
-- the name of the user who indexed the record,
-and keeps the complete raw row in "raw_columns".
+Converts every raw row (a JSON array with HTML snippets) into a dict
+with named fields. The last "stuff" column is fully parsed into:
 
-Keeps the output keys of the original version (notes, archives,
-archives_url, metryki_url, last_name_notes, ...) so generate.py works
-unchanged, and adds new, generalized keys (comments, scan_url, scan_urls).
+- comments/notes       - [i]-icon tooltips from any column (split by \r)
+- archives             - [z]-icon tooltip ("Miejsce przechowywania ksiąg")
+- archives_url         - href of the <a> wrapping z.png (absent if no link)
+- scan_urls/scan_url   - href(s) of the <a> wrapping s.png (absent if no scan)
+- user_entered         - uname from the [a]-icon link ("Indeks dodał")
+
+The unparsed original row is preserved in "raw_columns".
+Keeps the original output keys (notes, archives, archives_url,
+metryki_url, last_name_notes, ...) so generate.py works unchanged.
 """
 
 from collections import defaultdict
@@ -43,7 +45,8 @@ def extractIcons(cell):
   """Extracts (comments, archives, scans) from the [i]/[z]/[s] icons.
 
   Works on any table cell, not just the last "stuff" column. Comments from
-  the [i] icon tooltips may contain multiple entries separated by \r.
+  the [i] icon tooltips may contain multiple entries separated by \r
+  (encoded as &#013; in the HTML, decoded by html.unescape).
   """
   comments = []
   archives = []
@@ -106,7 +109,7 @@ def extractStuff(stuff):
     output['scan_url'] = scanUrls[0]
     # Backward-compatible key used by generate.py.
     output['metryki_url'] = scanUrls[0]
-  # User that entered this record to the database.
+  # User that entered this record to the database (a.png icon link).
   match = re.search(r'uname=([^"&]*)', stuff or '')
   if match:
     output['user_entered'] = match.group(1)
@@ -119,7 +122,8 @@ def convertPersonRecord(record):
   raw = list(record)
 
   def col(index):
-    return record[index] if index < len(record) else ''
+    value = record[index] if index < len(record) else ''
+    return str(value) if not isinstance(value, str) else value
 
   stuff = col(9)
   lastName, lastNameNotes = extractNotes(col(3))
@@ -135,7 +139,6 @@ def convertPersonRecord(record):
     'mother_last_name': motherLastName,
     'parish': col(7).strip(),
     'place': col(8).strip(),
-    'stuff': stuff,
     'raw_columns': raw,
   }
 
@@ -157,6 +160,8 @@ def convertPersonRecord(record):
     output['comments'] = deduped
     output.setdefault('notes', deduped)
 
+  # Fully parsed "stuff" column (comments, archives, archive URL,
+  # scan URL, user). No raw HTML is kept in the output.
   output.update(extractStuff(stuff))
   return output
 
@@ -166,7 +171,8 @@ def convertMarriageRecord(record):
   raw = list(record)
 
   def col(index):
-    return record[index] if index < len(record) else ''
+    value = record[index] if index < len(record) else ''
+    return str(value) if not isinstance(value, str) else value
 
   stuff = col(9)
   husbandLastName, husbandLastNameNotes = extractNotes(col(3))
@@ -182,7 +188,6 @@ def convertMarriageRecord(record):
     'wife_last_name': wifeLastName,
     'wife_parents': col(7).strip(),
     'parish': col(8).strip(),
-    'stuff': stuff,
     'raw_columns': raw,
   }
 
@@ -203,6 +208,7 @@ def convertMarriageRecord(record):
     output['comments'] = deduped
     output.setdefault('notes', deduped)
 
+  # Fully parsed "stuff" column - no raw HTML in the output.
   output.update(extractStuff(stuff))
   return output
 
