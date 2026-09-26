@@ -51,7 +51,7 @@ o archiwum (z.png) i odnośnikiem do skanu (s.png → metryki.genealodzy.pl).
 Jeśli użyto filtrów wyszukiwania, nazwa pliku zawiera dodatkowy
 8-znakowy znacznik zapytania, więc wyniki różnych kwerend nie mieszają się.
 
-2. Wstępne przetworzenie danych
+2. Wstępnie przetworzenie danych
 
 ```
 python merge.py
