@@ -5,8 +5,8 @@ Merges raw data from geneteka into larger json files.
 
 Parses all columns of the raw table rows, including:
 - all [i]-icon tooltips (comments) from any column,
-- archive information (z.png tooltips and links),
-- scan links (s.png icons linking to metryki.genealodzy.pl),
+- archive information (z.png tooltips and the link wrapping z.png),
+- scan links (the <a> tag wrapping the s.png icon),
 - the name of the user who indexed the record,
 and keeps the complete raw row in "raw_columns".
 
@@ -62,18 +62,7 @@ def extractIcons(cell):
 
 def extractLinks(cell):
   """Returns [(href, inner_html), ...] for all links in a cell."""
-  return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(cell or ''
-
-)]
-
-
-def extractScans(cell):
-  """Returns scan URLs (links around the s.png icon), from any cell."""
-  urls = []
-  for href, inner in extractLinks(cell):
-    if re.search(r's\.png', inner):
-      urls.append(href)
-  return urls
+  return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(cell or '')]
 
 
 def extractUrlsAround(cell, iconRe):
@@ -89,10 +78,14 @@ def extractUrlsAround(cell, iconRe):
   return urls
 
 
+def extractScans(cell):
+  """Returns scan URLs (links around the s.png icon), from any cell."""
+  return extractUrlsAround(cell, r's\.png')
+
+
 def extractStuff(stuff):
   """Parses the "stuff" column into a dict with all available extras."""
   comments, archives, scans = extractIcons(stuff)
-  links = extractLinks(stuff)
   output = {}
   if comments:
     output['comments'] = comments
@@ -100,13 +93,13 @@ def extractStuff(stuff):
     output['notes'] = comments
   if archives:
     output['archives'] = '\r'.join(archives)
-  # URL of the place where the archives are kept: the <a> tag that
-  # wraps the z.png icon (only present when the archive has a website).
+  # URL of the place where the archives are kept: the <a> tag that wraps
+  # the z.png icon. Absent when the archive has no website link.
   archiveUrls = extractUrlsAround(stuff, r'z\.png')
   if archiveUrls:
     output['archives_url'] = archiveUrls[0]
-  # URL(s) of the scan: the <a> tag that wraps the s.png icon
-  # (only present when a scan is available).
+  # URL of the scan: the <a> tag that wraps the s.png icon.
+  # Absent when no scan is available.
   scanUrls = extractScans(stuff)
   if scanUrls:
     output['scan_urls'] = scanUrls
@@ -148,13 +141,11 @@ def convertPersonRecord(record):
 
   # Notes attached to surname cells.
   if lastNameNotes:
-    output['last_name_notes'] 
-= lastNameNotes
+    output['last_name_notes'] = lastNameNotes
   if motherLastNameNotes:
     output['mother_last_name_notes'] = motherLastNameNotes
 
-  # [i] comments from every column, not just the "stuff" co
-lumn.
+  # [i] comments from every column, not just the "stuff" column.
   allComments = []
   for cell in record:
     comments, _, _ = extractIcons(cell)
@@ -220,15 +211,13 @@ def extractNotes(value):
   """Splits a cell into (text, note) using the [i] icon tooltip."""
   match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
   if match:
-    return (valu
-e.split('<', 1)[0].strip(), unescape(match.group(1)))
+    return (value.split('<', 1)[0].strip(), unescape(match.group(1)))
   return (value.strip(), None)
 
 
 def main():
   # Map from prefix to list of records.
-  data = defaultdict(li
-st)
+  data = defaultdict(list)
 
   # Read all files from INPUT_DIR.
   for fileName in os.listdir(INPUT_DIR):
