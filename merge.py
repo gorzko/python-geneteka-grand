@@ -36,6 +36,13 @@ def unescape(value):
   return html.unescape(value).strip()
 
 
+def asText(value):
+  """Coerces any cell value (the API may return ints, e.g. the year) to str."""
+  if isinstance(value, str):
+    return value
+  return '' if value is None else str(value)
+
+
 def imgField(tag, field):
   match = re.search(field + r'="([^"]*)"', tag)
   return match.group(1) if match else ''
@@ -51,7 +58,7 @@ def extractIcons(cell):
   comments = []
   archives = []
   scans = []
-  for tag in IMG_TAG_RE.findall(cell or ''):
+  for tag in IMG_TAG_RE.findall(asText(cell)):
     base = os.path.basename(imgField(tag, 'src'))
     title = unescape(imgField(tag, 'title'))
     if base == 'i.png' and title:
@@ -59,13 +66,14 @@ def extractIcons(cell):
     elif base == 'z.png' and title:
       archives.append(title)
     elif base == 's.png':
-      scans.append(title)
+   
+   scans.append(title)
   return comments, archives, scans
 
 
 def extractLinks(cell):
   """Returns [(href, inner_html), ...] for all links in a cell."""
-  return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(cell or '')]
+  return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(asText(cell))]
 
 
 def extractUrlsAround(cell, iconRe):
@@ -110,7 +118,7 @@ def extractStuff(stuff):
     # Backward-compatible key used by generate.py.
     output['metryki_url'] = scanUrls[0]
   # User that entered this record to the database (a.png icon link).
-  match = re.search(r'uname=([^"&]*)', stuff or '')
+  match = re.search(r'uname=([^"&]*)', asText(stuff))
   if match:
     output['user_entered'] = match.group(1)
   return output
@@ -119,11 +127,11 @@ def extractStuff(stuff):
 def convertPersonRecord(record):
   """Converts a raw birth/death row into a structured dict."""
   # Keep everything the API returned, unparsed.
-  raw = list(record)
+  ra
+w = list(record)
 
   def col(index):
-    value = record[index] if index < len(record) else ''
-    return str(value) if not isinstance(value, str) else value
+    return asText(record[index]) if index < len(record) else ''
 
   stuff = col(9)
   lastName, lastNameNotes = extractNotes(col(3))
@@ -171,8 +179,7 @@ def convertMarriageRecord(record):
   raw = list(record)
 
   def col(index):
-    value = record[index] if index < len(record) else ''
-    return str(value) if not isinstance(value, str) else value
+    return asText(record[index]) if index < len(record) else ''
 
   stuff = col(9)
   husbandLastName, husbandLastNameNotes = extractNotes(col(3))
@@ -184,7 +191,8 @@ def convertMarriageRecord(record):
     'husband_first_name': col(2).strip(),
     'husband_last_name': husbandLastName,
     'husband_parents': col(4).strip(),
-    'wife_first_name': col(5).strip(),
+    'wife_first_name': col(5)
+.strip(),
     'wife_last_name': wifeLastName,
     'wife_parents': col(7).strip(),
     'parish': col(8).strip(),
@@ -215,6 +223,7 @@ def convertMarriageRecord(record):
 
 def extractNotes(value):
   """Splits a cell into (text, note) using the [i] icon tooltip."""
+  value = asText(value)
   match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
   if match:
     return (value.split('<', 1)[0].strip(), unescape(match.group(1)))
@@ -252,7 +261,8 @@ def main():
     metadata = {
       'voivodeship': voivodeship,
       'record_type': recordType,
-      'parish_id': parishId,
+ 
+     'parish_id': parishId,
     }
     outputFile = os.path.join(OUTPUT_DIR, key + '.json')
     with open(outputFile, 'w') as file:
