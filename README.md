@@ -1,35 +1,71 @@
 Matches birth, death and marriage records from
-[Geneteka](http://geneteka.genealodzy.pl) and creates an HTML output with
+[Geneteka](https://geneteka.genealodzy.pl) and creates an HTML output with
 links between families.
 
 ## Po polsku
 
 Program automatycznie łączy akty małżeństwa, urodzin i zgonów
-z [Geneteki](http://geneteka.genealodzy.pl) i produkuje zbiór
+z [Geneteki](https://geneteka.genealodzy.pl) i produkuje zbiór
 stron HTML z odnośnikami pomiędzy rodzinami.
 
 Przykładowy wynik działania programu: http://przodkowie.ml/
 
 ### Przykład użycia programów
 
-1. Ściągnięcie danych z Geneteki.
+1. Ściągnięcie danych z Geneteki (wszystkie filtry z GUI).
+
+Sposób najprostszy: skopiuj w przeglądarce adres URL wyszukiwania
+w Genetece i podaj go przez `--url` — wszystkie filtry zostaną
+przejęte z adresu:
+
+```
+python fetch.py --url "https://geneteka.genealodzy.pl/index.php?op=gt&lang=pol&bdm=B&w=07mz&rid=944&search_lastname=Korzeniowski&from_date=1800&to_date=1900&exac=1&parents=1"
+```
+
+Można też podać te same filtry co w GUI jako opcje programu
+(pełna lista: `python fetch.py --help`):
+
+```
+python fetch.py -w 07mz -t B -r 944 --lastname Korzeniowski --from-date 1800 --to-date 1900 --exac
+```
+
+Obsługiwane filtry (te same, które GUI wysyła do `api/getAct.php`):
+`w` (województwo), `bdm` (B/S/D/A), `rid` (parafia lub B/S/D/A — wszystkie),
+`lang`, `search_lastname`, `search_name`, `search_lastname2`,
+`search_name2`, `from_date`, `to_date`, `exac` (dokładne dopasowanie),
+`pair` (para: małżonkowie lub dziecko+matka), `parents` (szukaj też po
+rodzicach), `near` (także w pobliskich parafiach).
+
+Stara składnia nadal działa:
+
 ```
 python fetch.py 07mz B 944
 python fetch.py 07mz S 857
 python fetch.py 07mz D 1745
 ```
-Aby wiedzieć, co wpisać jako argumenty wykonania programu, należy
-spojrzeć na adres URL podczas wyszukiwania w Genetece,
-np. `http://www.geneteka.genealodzy.pl/(...)&bdm=B&w=07mz&rid=944&(...)`
-i uruchomić program. Tu przykład dla parafii Klembów – urodzenia,
-małżeństwa i zgony.
+
+Surowe odpowiedzi API są zapisywane bez zmian, więc zawierają **wszystkie**
+kolumny tabeli, w tym kolumnę ze wskazówkami ikon [i] (uwagi), informacją
+o archiwum (z.png) i odnośnikiem do skanu (s.png → metryki.genealodzy.pl).
+
+Jeśli użyto filtrów wyszukiwania, nazwa pliku zawiera dodatkowy
+8-znakowy znacznik zapytania, więc wyniki różnych kwerend nie mieszają się.
 
 2. Wstępnie przetworzenie danych
+
 ```
 python merge.py
 ```
 
+merge.py parsuje teraz wszystkie kolumny każdego wiersza:
+- uwagi z ikon [i] w dowolnej kolumnie (`comments`/`notes`),
+- informację o archiwum i link do archiwum (`archives`, `archives_url`),
+- odnośnik do skanu, jeśli jest dostępny (`scan_urls`/`metryki_url`),
+- użytkownika, który zaindeksował akt (`user_entered`),
+- pełny surowy wiersz (`raw_columns`).
+
 3. Wygenerowanie plików HTML
+
 ```
 python generate.py
 ```
