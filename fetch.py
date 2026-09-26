@@ -95,16 +95,17 @@ def parseArguments():
   parser.add_argument('--lastname', help='surname of the searched person')
   parser.add_argument('--name', help='given name(s) of the searched person')
   parser.add_argument('--lastname2',
-      help='second surname (mother\'s for B/D, spouse\'s for S)')
+      help='second surname (mother's for B/D, spouse's for S)')
   parser.add_argument('--name2', help='second given name(s)')
-  parser.add_argument('--from-date', help='year range start (e.g. 1820)')
+  parser.add_argument(
+      '--from-date', help='year range start (e.g. 1820)')
   parser.add_argument('--to-date', help='year range end (e.g. 1885)')
   parser.add_argument('--exac', action='store_true',
       help='exact match (disable fuzzy/diacritic-insensitive search)')
   parser.add_argument('--pair', action='store_true',
       help='search for name+name2 as a pair (spouses / child+mother)')
   parser.add_argument('--parents', action='store_true',
-      help='also match by parents\' names')
+      help='also match by parents' names')
   parser.add_argument('--near', action='store_true',
       help='also search in nearby parishes (needs a surname, GUI rule)')
   parser.add_argument('--length', type=int, default=PAGE_SIZE,
@@ -198,6 +199,8 @@ def fetchPage(session, filters, start, length):
 
 def fetchAll(filters, outputDir):
   prefix = outputPrefix(filters, outputDir)
+  if not os.path.exists(outputDir):
+    os.makedirs(outputDir)
   session = requests.Session()
   # Warm up the session so we get any cookies the API expects.
   session.get(INDEX_URL, params={k: v for k, v in filters.items()},
@@ -207,6 +210,7 @@ def fetchAll(filters, outputDir):
   page = 0
   result = None
   totalPages = None
+  emptyWarned = False
   while True:
     print('Fetching {} page {}/{}'.format(
         os.path.basename(prefix), page + 1,
@@ -216,6 +220,28 @@ def fetchAll(filters, outputDir):
     with open(fileName, 'w') as f:
       f.write(response.text)
     data = response.json()
+    rows = data.get('data', [])
+    if not rows:
+      # The API sometimes returns an empty page together with
+      # recordsTotal > 0 (server-side glitch). Retry the page before
+      # giving up, so we do not silently save an empty data_raw file.
+      if page == 0 and not emptyWarned:
+        emptyWarned = True
+        totalCheck = int(data.get('recordsTotal', 0))
+        if totalCheck > 0:
+          print('Warning: API reported {} records but returned an empty '
+                'page; retrying...'.format(totalCheck))
+          time.sleep(5)
+          response = fetchPage(session, filters, page * length, length)
+          with open(fileName, 'w') as f:
+            f.write(response.text)
+          data = response.json()
+          rows = data.get('data', [])
+          if not rows:
+            print('Warning: retry also returned an empty page.')
+      elif page > 0:
+        # Last page may legitimately be partial but never fully empty.
+        print('Warning: page {} returned no rows.'.format(page + 1))
     if result is None:
       result = data
       total = int(data.get('recordsTotal', 0))
@@ -244,5 +270,5 @@ def main():
   print('Fetched {} records.'.format(len(data)))
 
 
-if __name__ == '__main__':
+if __name__ == '__ymain__':
   main()
