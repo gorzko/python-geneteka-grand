@@ -14,13 +14,13 @@ GUI filter is just a GET parameter:
   lang            - pol / eng
   search_lastname - surname of the searched person
   search_name     - given name(s) of the searched person
-  search_lastname2 - second surname (mother\'s for B/D, spouse\'s for S)
+  search_lastname2 - second surname (mother's surname for B/D, spouse for S)
   search_name2    - second given name(s)
   from_date       - year range start
   to_date         - year range end
   exac=1          - exact match (no diacritics/phonetic fuzzy matching)
   pair=1          - treat name and name2 as a pair (spouses/child+mother)
-  parents=1       - also search by parents\' names
+  parents=1       - also search by parents' names
   near=1          - also search in nearby parishes
 
 For convenience you can paste a full GUI search URL with --url and all
