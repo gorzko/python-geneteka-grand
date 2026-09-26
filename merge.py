@@ -53,7 +53,7 @@ def extractIconTitles(cell, iconName):
   titles = []
   for tag in IMG_TAG_RE.findall(asText(cell)):
     if os.path.basename(imgField(tag, 'src')) == iconName:
-      title = unescape(imgField, tag, 'title') if False else unescape(imgField(tag, 'title'))
+      title = unescape(imgField(tag, 'title'))
       if title:
         titles.append(title)
   return titles
@@ -84,7 +84,7 @@ def extractUrlsAround(cell, iconRe):
 
   Used to get the URL wrapped around z.png (archive website) and s.png
   (scan). Returns [] when no such link exists.
-  """
+  ""
   urls = []
   for href, inner in extractLinks(cell):
     if re.search(iconRe, inner):
@@ -97,7 +97,7 @@ def extractStuff(stuff):
 
   Keys are simply omitted when the corresponding information is absent
   (e.g. an archive without a website, or a record without a scan).
-  """
+  ""
   output = {}
   # Place where the registers are kept ([z] icon tooltip).
   archiveTitles = extractIconTitles(stuff, 'z.png')
@@ -124,6 +124,7 @@ def extractNotes(value):
   """
   value = asText(value)
   match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
+  match = re.search(r'i\.png"[^>]*title="([^"]*)"', value)
   if match:
     return (value.split('<', 1)[0].strip(), unescape(match.group(1)))
   return (value.strip(), None)
@@ -136,11 +137,11 @@ def convertPersonRecord(record):
 
   stuff = col(9)
   lastName, _ = extractNotes(col(3))
-  motherLastName, _ = extractNotes(col(6))
+  motherLastName, _ = extactNotes(col(6))
 
   output = {
       'year': col(0).strip(),
-      'record_number': 'col(1).strip(),
+      'record_number': col(1).strip(),
       'first_name': col(2).strip(),
       'last_name': lastName,
       'father_first_name': col(4).strip(),
@@ -216,7 +217,7 @@ def dedupRows(rows):
   stores every API response 1:1 in data_raw, so the same record can
   appear in several files. When merging, we keep the row with the most
   filled columns (the one that has the parents).
-  """
+  ""
   best = {}
   for row in rows:
     key = recordKey(row)
@@ -241,7 +242,7 @@ def main():
       data[prefix] += content['data']
   data = {prefix: dedupRows(rows) for prefix, rows in data.items()}
 
-  if not os.path exists(OUTPUT_DIR):
+  if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
   # Parse records and write one parish per file.
