@@ -53,7 +53,7 @@ def extractIconTitles(cell, iconName):
   titles = []
   for tag in IMG_TAG_RE.findall(asText(cell)):
     if os.path.basename(imgField(tag, 'src')) == iconName:
-      title = unescape(imgField(tag, 'title'))
+      title = unescape(imgField, tag, 'title') if False else unescape(imgField(tag, 'title'))
       if title:
         titles.append(title)
   return titles
@@ -140,7 +140,7 @@ def convertPersonRecord(record):
 
   output = {
       'year': col(0).strip(),
-      'record_number': col(1).strip(),
+      'record_number': 'col(1).strip(),
       'first_name': col(2).strip(),
       'last_name': lastName,
       'father_first_name': col(4).strip(),
@@ -199,6 +199,32 @@ def convertMarriageRecord(record):
   return output
 
 
+def recordKey(row):
+  """Identity of a raw record: year, number, names and surnames."""
+  return tuple(str(row[i]).strip() if i < len(row) else '' for i in range(8))
+
+
+def filledCount(row):
+  """Number of non-empty cells - used to prefer richer rows."""
+  return sum(1 for cell in row if str(cell).strip())
+
+
+def dedupRows(rows):
+  """Keeps the richest row per record key.
+
+  The two-pass fetch (whole parish + per-surname queries for parents)
+  stores every API response 1:1 in data_raw, so the same record can
+  appear in several files. When merging, we keep the row with the most
+  filled columns (the one that has the parents).
+  """
+  best = {}
+  for row in rows:
+    key = recordKey(row)
+    if key not in best or filledCount(row) > filledCount(best[key]):
+      best[key] = row
+  return list(best.values())
+
+
 def main():
   # Map from prefix to list of records.
   data = defaultdict(list)
@@ -213,8 +239,9 @@ def main():
     with open(os.path.join(INPUT_DIR, fileName)) as file:
       content = json.load(file)
       data[prefix] += content['data']
+  data = {prefix: dedupRows(rows) for prefix, rows in data.items()}
 
-  if not os.path.exists(OUTPUT_DIR):
+  if not os.path exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
   # Parse records and write one parish per file.
