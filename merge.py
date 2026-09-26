@@ -4,20 +4,17 @@
 Merges raw data from geneteka into larger json files.
 
 Converts every raw row (a JSON array with HTML snippets) into a dict
-with named fields. The last "stuff" column is fully parsed into:
+with named fields. The last "Uwagi" column is fully parsed into:
 
-- comments/notes       - [i]-icon tooltips from any column (split by \r)
-- archives             - [z]-icon tooltip ("Miejsce przechowywania ksiag")
-- archives_url         - href of the <a> wrapping z.png (absent if no link)
-- scan_urls/scan_url   - href(s) of the <a> wrapping s.png (absent if no scan)
-- user_entered         - uname from the [a]-icon link ("Indeks dodal")
+- comments      - [i]-icon tooltips from any column (split by \r,
+                  i.e. the encoded &#013; entity)
+- archives      - [z]-icon tooltip ("Miejsce przechowywania ksiąg")
+- archives_url  - href of the <a> wrapping z.png (absent if no link)
+- scan_url      - href of the <a> wrapping s.png (absent if no scan)
+- user_entered  - uname from the [a]-icon link ("Indeks dodał")
 
-The unparsed original row is preserved in "raw_columns".
-Keeps the original output keys (notes, archives, archives_url,
-metryki_url, last_name_notes, ...) so generate.py works unchanged.
-
-Every cell is coerced to str via asText() before any parsing, because
-the API may return non-string values (e.g. the year as an int).
+No raw HTML is kept in the output; data_raw keeps the raw API
+responses (1:1) so this step can always be re-run.
 """
 
 from collections import defaultdict
@@ -35,10 +32,6 @@ IMG_TAG_RE = re.compile(r'<img\b[^>]*>')
 LINK_RE = re.compile(r'<a\b[^>]*href="([^"]*)"[^>]*>(.*?)</a>', re.S)
 
 
-def unescape(value):
-  return html.unescape(value).strip()
-
-
 def asText(value):
   """Coerces any cell value (the API may return ints, e.g. the year) to str."""
   if isinstance(value, str):
@@ -46,36 +39,35 @@ def asText(value):
   return '' if value is None else str(value)
 
 
+def unescape(value):
+  return html.unescape(value).strip()
+
+
 def imgField(tag, field):
   match = re.search(field + r'="([^"]*)"', tag)
   return match.group(1) if match else ''
 
 
-def extractIcons(cell):
-  """Extracts (comments, archives, scans) from the [i]/[z]/[s] icons.
+def extractComments(cell):
+  """Extracts comments from [i]-icon tooltips in any table cell.
 
-  Works on any table cell, not just the last "stuff" column. Comments from
-  the [i] icon tooltips may contain multiple entries separated by \r
+  A single tooltip may contain multiple comments separated by \r
   (encoded as &#013; in the HTML, decoded by html.unescape).
   """
   comments = []
-  archives = []
-  scans = []
   for tag in IMG_TAG_RE.findall(asText(cell)):
-    base = os.path.basename(imgField(tag, 'src'))
-    title = unescape(imgField(tag, 'title'))
-    if base == 'i.png' and title:
-      comments.extend(part.strip() for part in title.split('\r') if part.strip())
-    elif base == 'z.png' and title:
-      archives.append(title)
-    elif base == 's.png':
-      scans.append(title)
-  return comments, archives, scans
+    if os.path.basename(imgField(tag, 'src')) == 'i.png':
+      title = unescape(imgField(tag, 'title'))
+      comments.extend(
+          part.strip() for part in title.split('\r') if part.strip())
+  return comments
 
 
 def extractLinks(cell):
   """Returns [(href, inner_html), ...] for all links in a cell."""
-  return [(html.unescape(href), inner) for href, inner in LINK_RE.findall(asText(cell))]
+  return [
+      (html.unescape(href), inner)
+      for href, inner in LINK_RE.findall(asText(cell))]
 
 
 def extractUrlsAround(cell, iconRe):
@@ -91,131 +83,23 @@ def extractUrlsAround(cell, iconRe):
   return urls
 
 
-def extractScans(cell):
-  """Returns scan URLs (links around the s.png icon), from any cell."""
-  return extractUrlsAround(cell, r's\.png')
-
-
 def extractStuff(stuff):
-  """Parses the "stuff" column into a dict with all available extras."""
-  comments, archives, scans = extractIcons(stuff)
+  """Parses the "Uwagi" column into a dict with all available extras.
+
+  Keys are simply omitted when the corresponding information is absent
+  (e.g. an archive without a website, or a record without a scan).
+  """
   output = {}
-  if comments:
-    output['comments'] = comments
-    # Backward-compatible key used by generate.py.
-    output['notes'] = comments
-  if archives:
-    output['archives'] = '\r'.join(archives)
-  # URL of the place where the archives are kept: the <a> tag that wraps
-  # the z.png icon. Absent when the archive has no website link.
   archiveUrls = extractUrlsAround(stuff, r'z\.png')
   if archiveUrls:
     output['archives_url'] = archiveUrls[0]
-  # URL of the scan: the <a> tag that wraps the s.png icon.
-  # Absent when no scan is available.
-  scanUrls = extractScans(stuff)
+  scanUrls = extractUrlsAround(stuff, r's\.png')
   if scanUrls:
-    output['scan_urls'] = scanUrls
+    # A record has at most one scan link.
     output['scan_url'] = scanUrls[0]
-    # Backward-compatible key used by generate.py.
-    output['metryki_url'] = scanUrls[0]
-  # User that entered this record to the database (a.png icon link).
   match = re.search(r'uname=([^"&]*)', asText(stuff))
   if match:
     output['user_entered'] = match.group(1)
-  return output
-
-
-def convertPersonRecord(record):
-  """Converts a raw birth/death row into a structured dict."""
-  # Keep everything the API returned, unparsed.
-  raw = list(record)
-
-  def col(index):
-    return asText(record[index]) if index < len(record) else ''
-
-  stuff = col(9)
-  lastName, lastNameNotes = extractNotes(col(3))
-  motherLastName, motherLastNameNotes = extractNotes(col(6))
-
-  output = {
-    'year': col(0).strip(),
-    'record_number': col(1).strip(),
-    'first_name': col(2).strip(),
-    'last_name': lastName,
-    'father_first_name': col(4).strip(),
-    'mother_first_name': col(5).strip(),
-    'mother_last_name': motherLastName,
-    'parish': col(7).strip(),
-    'place': col(8).strip(),
-    'raw_columns': raw,
-  }
-
-  # Notes attached to surname cells.
-  if lastNameNotes:
-    output['last_name_notes'] = lastNameNotes
-  if motherLastNameNotes:
-    output['mother_last_name_notes'] = motherLastNameNotes
-
-  # [i] comments from every column, not just the "stuff" column.
-  allComments = []
-  for cell in record:
-    comments, _, _ = extractIcons(cell)
-    allComments.extend(comments)
-  if allComments:
-    seen = set()
-    deduped = [c for c in allComments if not (c in seen or seen.add(c))]
-    output['comments'] = deduped
-    output.setdefault('notes', deduped)
-
-  # Fully parsed "stuff" column (comments, archives, archive URL,
-  # scan URL, user). No raw HTML is kept in the output.
-  output.update(extractStuff(stuff))
-  return output
-
-
-def convertMarriageRecord(record):
-  """Converts a raw marriage row into a structured dict."""
-  raw = list(record)
-
-  def col(index):
-    return asText(record[index]) if index < len(record) else ''
-
-  stuff = col(9)
-  husbandLastName, husbandLastNameNotes = extractNotes(col(3))
-  wifeLastName, wifeLastNameNotes = extractNotes(col(6))
-
-  output = {
-    'year': col(0).strip(),
-    'record_number': col(1).strip(),
-    'husband_first_name': col(2).strip(),
-    'husband_last_name': husbandLastName,
-    'husband_parents': col(4).strip(),
-    'wife_first_name': col(5).strip(),
-    'wife_last_name': wifeLastName,
-    'wife_parents': col(7).strip(),
-    'parish': col(8).strip(),
-    'raw_columns': raw,
-  }
-
-  if husbandLastNameNotes:
-    output['nazwisko_meza_uwagi'] = husbandLastNameNotes
-  if wifeLastNameNotes:
-    output['nazwisko_zony_uwagi'] = wifeLastNameNotes
-
-  # [i] comments from every column.
-  allComments = []
-  for cell in record:
-    comments, _, _ = extractIcons(cell)
-    allComments.extend(comments)
-  if allComments:
-    seen = set()
-    deduped = [c for c in allComments if not (c in seen or seen.add(c))]
-    output['comments'] = deduped
-    output.setdefault('notes', deduped)
-
-  # Fully parsed "stuff" column - no raw HTML in the output.
-  output.update(extractStuff(stuff))
   return output
 
 
@@ -226,6 +110,87 @@ def extractNotes(value):
   if match:
     return (value.split('<', 1)[0].strip(), unescape(match.group(1)))
   return (value.strip(), None)
+
+
+def convertPersonRecord(record):
+  """Converts a raw birth/death row into a structured dict."""
+  def col(index):
+    return asText(record[index]) if index < len(record) else ''
+
+  stuff = col(9)
+  lastName, lastNameNotes = extractNotes(col(3))
+  motherLastName, motherLastNameNotes = extractNotes(col(6))
+
+  output = {
+      'year': col(0).strip(),
+      'record_number': col(1).strip(),
+      'first_name': col(2).strip(),
+      'last_name': lastName,
+      'father_first_name': col(4).strip(),
+      'mother_first_name': col(5).strip(),
+      'mother_last_name': motherLastName,
+      'parish': col(7).strip(),
+      'place': col(8).strip(),
+  }
+
+  # Notes attached to surname cells.
+  if lastNameNotes:
+    output['last_name_notes'] = lastNameNotes
+  if motherLastNameNotes:
+    output['mother_last_name_notes'] = motherLastNameNotes
+
+  # Comments from every column, deduplicated, in order of appearance.
+  allComments = []
+  for cell in record:
+    allComments.extend(extractComments(cell))
+  if allComments:
+    seen = set()
+    output['comments'] = [
+        c for c in allComments if not (c in seen or seen.add(c))]
+
+  # Fully parsed "Uwagi" column (archive, archive URL, scan URL, user).
+  output.update(extractStuff(stuff))
+  return output
+
+
+def convertMarriageRecord(record):
+  """Converts a raw marriage row into a structured dict."""
+  def col(index):
+    return asText(record[index]) if index < len(record) else ''
+
+  stuff = col(9)
+  husbandLastName, husbandLastNameNotes = extractNotes(col(3))
+  wifeLastName, wifeLastNameNotes = extractNotes(col(6))
+
+  output = {
+      'year': col(0).strip(),
+      'record_number': col(1).strip(),
+      'husband_first_name': col(2).strip(),
+      'husband_last_name': husbandLastName,
+      'husband_parents': col(4).strip(),
+      'wife_first_name': col(5).strip(),
+      'wife_last_name': wifeLastName,
+      'wife_parents': col(7).strip(),
+      'parish': col(8).strip(),
+  }
+
+  if husbandLastNameNotes:
+    output['nazwisko_meza_uwagi'] = husbandLastNameNotes
+  if wifeLastNameNotes:
+    output['nazwisko_zony_uwagi'] = wifeLastNameNotes
+
+  # Comments from every column, deduplicated, in order of appearance.
+  allComments = []
+  for cell in record:
+    allComments.extend(extractComments(cell))
+  if allComments:
+    seen = set()
+    output['comments'] = [
+        c for c in allComments if not (c in seen or seen.add(c))]
+
+  # Fully parsed "Uwagi" column.
+  output.update(extractStuff(stuff))
+  return output
 
 
 def main():
@@ -257,15 +222,15 @@ def main():
 
     print("Writing %s" % key)
     metadata = {
-      'voivodeship': voivodeship,
-      'record_type': recordType,
-      'parish_id': parishId,
+        'voivodeship': voivodeship,
+        'record_type': recordType,
+        'parish_id': parishId,
     }
     outputFile = os.path.join(OUTPUT_DIR, key + '.json')
     with open(outputFile, 'w') as file:
       outputData = {
-        'data': value,
-        'metadata': metadata,
+          'data': value,
+          'metadata': metadata,
       }
       json.dump(outputData, file, ensure_ascii=False)
 
