@@ -199,7 +199,7 @@ def fetchPage(session, filters, start, length):
       return response
     except (requests.RequestException, ValueError) as e:
       lastError = e
-      if attempt + 1 < MAX_REtries:
+      if attempt + 1 < MAX_RETRIES:
         time.sleep(5 * (attempt + 1))
   raise lastError
 
