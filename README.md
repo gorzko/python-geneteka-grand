@@ -73,6 +73,12 @@ Znane ograniczenia API (obsługiwane automatycznie):
   jest wtedy ponawiana;
 - po serii szybkich zapytań serwer chwilowo throttluje (puste odpowiedzi
   200) — fetch.py czeka i ponawia zapytanie;
+- czasem API ignoruje `rid`/filtr i zwraca wyniki dla **całego
+  województwa** (zawyżony `recordsTotal`). Przebieg 2 porównuje totał
+  każdej kwerendy nazwiska z totałem kwerendy bez filtra — wynik większy
+  niż totał bez filtra to matematycznie niemożliwy glitch; nazwisko jest
+  wtedy ponawiane, a jeśli glitch się utrzymuje, pomijane z ostrzeżeniem
+  (ponowne uruchomienie fetch.py je dorobi);
 - dla małych parafii pewność kompletności daje też pobranie wąskich
   zakresów rocznych (`from_date`/`to_date`).
 
