@@ -294,7 +294,7 @@ def fetchPaged(session, filters, prefix, pageCounter, maxTotal=None):
     start += PAGE_SIZE
     if start >= totalPages * PAGE_SIZE:
       break
-    # Sleep not to overload the server ser with continuous load.
+    # Sleep not to overload the server with continuous load.
     time.sleep(SLEEP_SECONDS)
   return result['data']
 
@@ -332,7 +332,7 @@ def enumerateRows(session, filters):
 
 def fetchAll(filters, outputDir):
   prefix = outputPrefix(filters, outputDir)
-  if not os.path exists(outputDir):
+  if not os.path.exists(outputDir):
     os.makedirs(outputDir)
   session = requests.Session()
   # Warm up the session so we get any cookies the API expects.
@@ -346,7 +346,7 @@ def fetchAll(filters, outputDir):
     print('No name/surname filter: enumerating records (pass 1)...')
     pass1Rows, unfilteredTotal = enumerateRows(session, filters)
     # search_lastname matches the surname on either side of a record, so
-    # one surname query covers every record that contains it. Index the
+    # one surname query covers every record that contain it. Index the
     # surnames of both sides and skip a surname once all its records are
     # fetched - one query for a frequent surname covers the rarer
     # surnames married into it.
