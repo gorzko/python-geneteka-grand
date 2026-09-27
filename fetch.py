@@ -27,9 +27,11 @@ API quirk: getAct.php only returns complete, correctly paginated pages of
 the right record type when a name/surname filter is active. Without such a
 filter the server truncates pages to a handful of rows, ignores pagination
 and may mix record types, and the parents columns are empty. Whole-parish
-downloads therefore work in two passes: pass 1 enumerates the surnames in
-the parish, pass 2 fetches each surname with search_lastname (complete
-pages, correct type, parents included).
+downloads therefore work in two passes: pass 1 lists the records of the
+unfiltered query, pass 2 fetches them per surname with search_lastname
+(complete pages, correct type, parents included). One surname query covers
+every record that contains the surname (either side), so pass 2 skips a
+surname once all its records are already fetched.
 
 The raw JSON responses of pass 2 are saved unmodified, so every column
 the API returns (including the "stuff" column with [i] tooltips, archive
@@ -197,7 +199,7 @@ def fetchPage(session, filters, start, length):
       return response
     except (requests.RequestException, ValueError) as e:
       lastError = e
-      if attempt + 1 < MAX_RETRIES:
+      if attempt + 1 < MAX_REtries:
         time.sleep(5 * (attempt + 1))
   raise lastError
 
@@ -213,6 +215,17 @@ def stripCellHtml(value):
 def recordKey(row):
   """Identity of a raw record: year, number, names and surnames."""
   return tuple(str(row[i]).strip() if i < len(row) else '' for i in range(8))
+
+
+def recordKeyNoParents(row):
+  """Identity of a record, ignoring the parents columns (4 and 7).
+
+  Pass-1 (unfiltered) rows have the parents columns empty while pass-2
+  rows have them filled, so recordKey cannot match a record across the
+  two passes; this key can.
+  """
+  return tuple(
+      str(row[i]).strip() if i < len(row) else '' for i in (0, 1, 2, 3, 5, 6))
 
 
 def fetchPaged(session, filters, prefix, pageCounter, maxTotal=None):
@@ -284,40 +297,32 @@ def fetchPaged(session, filters, prefix, pageCounter, maxTotal=None):
   return result['data']
 
 
-def enumerateSurnames(session, filters):
-  """Pass 1: collects unique surnames from an unfiltered query.
+def enumerateRows(session, filters):
+  """Pass 1: fetches the unfiltered query to list all its records.
 
   Unfiltered responses may be truncated and may mix record types, so they
-  are only used to enumerate surnames and are NOT saved to data_raw.
-  Returns (surnames, recordsTotal of the unfiltered query).
+  are only used to plan pass 2 and are NOT saved to data_raw.
+  Returns (rows, recordsTotal of the unfiltered query).
   """
-  surnames = []
-  seen = set()
+  rows = []
   start = 0
   totalPages = None
   total = 0
   while True:
     response = fetchPage(session, filters, start, PAGE_SIZE)
     data = response.json()
-    rows = data.get('data', [])
+    pageRows = data.get('data', [])
     if totalPages is None:
       total = int(data.get('recordsTotal', 0))
       totalPages = max(1, int(math.ceil(1.0 * total / PAGE_SIZE)))
       if total == 0:
         break
-    for row in rows:
-      for index in (3, 6):
-        if index >= len(row):
-          continue
-        surname = stripCellHtml(row[index])
-        if surname and surname not in seen:
-          seen.add(surname)
-          surnames.append(surname)
+    rows.extend(pageRows)
     start += PAGE_SIZE
     if start >= totalPages * PAGE_SIZE:
       break
     time.sleep(SLEEP_SECONDS)
-  return surnames, total
+  return rows, total
 
 
 def fetchAll(filters, outputDir):
@@ -331,27 +336,58 @@ def fetchAll(filters, outputDir):
 
   # Without a name/surname filter the API truncates pages, ignores
   # pagination and returns no parents, so whole-parish downloads are
-  # fetched per surname (pass 1 enumerates them, pass 2 fetches them).
+  # fetched per surname (pass 1 lists the records, pass 2 fetches them).
   if not (filters.get('search_lastname') or filters.get('search_name')):
-    print('No name/surname filter: enumerating surnames (pass 1)...')
-    surnames, unfilteredTotal = enumerateSurnames(session, filters)
-    print('Found {} unique surnames; fetching each (pass 2)...'.format(
-        len(surnames)))
+    print('No name/surname filter: enumerating records (pass 1)...')
+    pass1Rows, unfilteredTotal = enumerateRows(session, filters)
+    # search_lastname matches the surname on either side of a record, so
+    # one surname query covers every record that contains it. Index the
+    # surnames of both sides and skip a surname once all its records are
+    # fetched - one query for a frequent surname covers the rarer
+    # surnames married into it.
+    surnameToKeys = {}
+    pass1Keys = set()
+    for row in pass1Rows:
+      key = recordKeyNoParents(row)
+      pass1Keys.add(key)
+      for index in (3, 6):
+        if index >= len(row):
+          continue
+        surname = stripCellHtml(row[index])
+        if surname:
+          surnameToKeys.setdefault(surname, set()).add(key)
+    print('Found {} records with {} unique surnames; fetching per surname '
+          '(pass 2)...'.format(len(pass1Keys), len(surnameToKeys)))
+    # Most frequent surnames first: they cover the most records per query.
+    orderedSurnames = sorted(
+        surnameToKeys.items(), key=lambda item: (-len(item[1]), item[0]))
     pageCounter = [0]
     allRows = []
+    coveredKeys = set()
     seenKeys = set()
-    for surname in surnames:
+    for surname, keys in orderedSurnames:
+      if keys <= coveredKeys:
+        print('Skipping {}: its {} record(s) already fetched.'.format(
+            surname, len(keys)))
+        continue
       subFilters = dict(filters)
       subFilters['search_lastname'] = surname
       rows = fetchPaged(session, subFilters, prefix, pageCounter,
                         maxTotal=unfilteredTotal)
       for row in rows:
+        coveredKeys.add(recordKeyNoParents(row))
         key = recordKey(row)
         if key in seenKeys:
           continue
         seenKeys.add(key)
         allRows.append(row)
       time.sleep(SLEEP_SECONDS)
+    uncovered = pass1Keys - coveredKeys
+    if uncovered:
+      print('Warning: {} of {} records were not returned by any surname '
+            'query (e.g. records with no surname on either side); '
+            're-running fetch.py may fetch them.'.format(
+                len(uncovered), len(pass1Keys)))
     return allRows
 
   pageCounter = [0]
