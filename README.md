@@ -59,10 +59,16 @@ serwer ucina strony do kilku wierszy, ignoruje paginację i pomija kolumny
 rodziców. Dlatego kwerenda całej parafii (bez `search_lastname`/
 `search_name`) działa dwuprzebiegowo:
 
-1. **Przebieg 1** — enumeracja nazwisk w parafii (niezapisywane do
-   `data_raw`, bo odpowiedzi bez filtra mogą mieszać księgi);
-2. **Przebieg 2** — pobranie każdego nazwiska z `search_lastname`
-   (kompletne strony, rodzice uwzględnieni), zapis 1:1 do `data_raw`.
+1. **Przebieg 1** — lista rekordów parafii (niezapisywana do `data_raw`,
+   bo odpowiedzi bez filtra mogą mieszać księgi i są ucięte);
+2. **Przebieg 2** — pobranie per nazwisko z `search_lastname` (kompletne
+   strony, rodzice uwzględnieni), zapis 1:1 do `data_raw`.
+
+`search_lastname` pasuje do nazwiska pana **lub** pani młodej, więc jedno
+zapytanie pokrywa każdy rekord zawierający dane nazwisko. Przebieg 2
+porządkuje nazwiska od najczęstszych i pomija te, których rekordy są już
+pobrane — dla Zręcina S: 416 unikalnych nazwisk → 116 kwerend (72% mniej
+zapytań).
 
 Ten sam rekord może więc trafić do kilku plików `data_raw`; `merge.py`
 deduplikuje wiersze po kluczu rekordu, zachowując wersję z największą
