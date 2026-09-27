@@ -161,7 +161,7 @@ def outputPrefix(filters, outputDir):
   The prefix stays compatible with merge.py: voivodeship_recordtype_parishid,
   optionally followed by an 8-char hash when search filters other than
   w/bdm/rid/lang are used, so different queries never get merged together.
-  ""
+  """
   extra = {
       key: value for key, value in filters.items()
       if key not in ('op', 'w', 'bdm', 'rid', 'lang') and value not in (None, '', '0')
