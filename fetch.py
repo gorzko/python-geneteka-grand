@@ -29,9 +29,9 @@ filter the server truncates pages to a handful of rows, ignores pagination
 and may mix record types, and the parents columns are empty. Whole-parish
 downloads therefore work in two passes: pass 1 lists the records of the
 unfiltered query, pass 2 fetches them per surname with search_lastname
-(complete pages, correct type, parents included). One surname query covers
-every record that contains the surname (either side), so pass 2 skips a
-surname once all its records are already fetched.
+(complete pages, correct type, parents included). Because search_lastname
+matches the surname of both spouses, one surname query covers every
+record that contains it, so pass 2 also skips already covered surnames.
 
 The raw JSON responses of pass 2 are saved unmodified, so every column
 the API returns (including the "stuff" column with [i] tooltips, archive
@@ -364,11 +364,10 @@ def fetchAll(filters, outputDir):
     pageCounter = [0]
     allRows = []
     coveredKeys = set()
-    seenKeys = set()
+    skipCount = 0
     for surname, keys in orderedSurnames:
       if keys <= coveredKeys:
-        print('Skipping {}: its {} record(s) already fetched.'.format(
-            surname, len(keys)))
+        skipCount += 1
         continue
       subFilters = dict(filters)
       subFilters['search_lastname'] = surname
@@ -382,6 +381,8 @@ def fetchAll(filters, outputDir):
         seenKeys.add(key)
         allRows.append(row)
       time.sleep(SLEEP_SECONDS)
+    print('Skipped {} surname queries whose records were already fetched.'
+          .format(skipCount))
     uncovered = pass1Keys - coveredKeys
     if uncovered:
       print('Warning: {} of {} records were not returned by any surname '
@@ -405,5 +406,5 @@ def main():
   print('Fetched {} records.'.format(len(data)))
 
 
-if __name__ == '__main__':
+if __name__ == '____main__':
   main()
