@@ -161,7 +161,7 @@ def outputPrefix(filters, outputDir):
   The prefix stays compatible with merge.py: voivodeship_recordtype_parishid,
   optionally followed by an 8-char hash when search filters other than
   w/bdm/rid/lang are used, so different queries never get merged together.
-  """
+  ""
   extra = {
       key: value for key, value in filters.items()
       if key not in ('op', 'w', 'bdm', 'rid', 'lang') and value not in (None, '', '0')
@@ -215,56 +215,67 @@ def recordKey(row):
   return tuple(str(row[i]).strip() if i < len(row) else '' for i in range(8))
 
 
-def fetchPaged(session, filters, prefix, pageCounter):
+def fetchPaged(session, filters, prefix, pageCounter, maxTotal=None):
   """Fetches all pages of one filtered query, saving each response 1:1.
 
   pageCounter is a one-element list holding the next data_raw file number,
-  shared across per-surname queries. Returns the merged rows.
+  shared across per-surname queries. maxTotal, when given, is recordsTotal
+  of the same query without the surname filter: a filtered result can never
+  be bigger, so a page reporting more records than maxTotal is a server
+  glitch (the API intermittently ignores rid/search and answers for the
+  whole region). Glitched pages are retried and the surname is skipped if
+  the glitch persists. Returns the merged rows.
   """
   result = None
   start = 0
   totalPages = None
   emptyWarned = False
+  glitchRetries = 0
   while True:
     print('Fetching {} page {}/{}'.format(
         os.path.basename(prefix), start // PAGE_SIZE + 1,
         totalPages if totalPages else '?'))
     response = fetchPage(session, filters, start, PAGE_SIZE)
-    fileName = '{}_{:05d}.json'.format(prefix, pageCounter[0])
-    with open(fileName, 'w') as f:
-      f.write(response.text)
-    pageCounter[0] += 1
     data = response.json()
     rows = data.get('data', [])
-    if not rows:
-      # The API sometimes returns an empty page together with
-      # recordsTotal > 0 (server-side glitch). Retry the page before
-      # giving up, so we do not silently save an empty data_raw file.
-      if start == 0 and not emptyWarned:
-        emptyWarned = True
-        totalCheck = int(data.get('recordsTotal', 0))
-        if totalCheck > 0:
-          print('Warning: API reported {} records but returned an empty '
-                'page; retrying...'.format(totalCheck))
-          time.sleep(5)
-          response = fetchPage(session, filters, start, PAGE_SIZE)
-          with open(fileName, 'w') as f:
-            f.write(response.text)
-          data = response.json()
-          rows = data.get('data', [])
-          if not rows:
-            print('Warning: retry also returned an empty page.')
-      else:
-        print('Warning: page at start={} returned no rows.'.format(start))
+    total = int(data.get('recordsTotal', 0))
     if result is None:
+      if maxTotal is not None and total > maxTotal:
+        # Server glitch: a filtered query cannot return more records
+        # than the same query without the filter. Retry before skipping.
+        if glitchRetries < MAX_RETRIES:
+          glitchRetries += 1
+          print('Warning: API reported {} records (> {} without the '
+                'surname filter); server glitch, retrying...'.format(
+                    total, maxTotal))
+          time.sleep(5 * glitchRetries)
+          continue
+        print('Warning: API keeps reporting {} records (> {}); skipping '
+              'this surname - re-run fetch.py to complete it.'.format(
+                  total, maxTotal))
+        return []
+      if not rows and total > 0 and not emptyWarned:
+        # The API sometimes returns an empty page together with
+        # recordsTotal > 0 (server-side glitch). Retry the page before
+        # giving up, so we do not silently save an empty data_raw file.
+        emptyWarned = True
+        print('Warning: API reported {} records but returned an empty '
+              'page; retrying...'.format(total))
+        time.sleep(5)
+        continue
       result = data
-      total = int(data.get('recordsTotal', 0))
       totalPages = max(1, int(math.ceil(1.0 * total / PAGE_SIZE)))
       if total == 0:
         print('No records found.')
         return []
     else:
+      if not rows:
+        print('Warning: page at start={} returned no rows.'.format(start))
       result['data'].extend(rows)
+    fileName = '{}_{:05d}.json'.format(prefix, pageCounter[0])
+    with open(fileName, 'w') as f:
+      f.write(response.text)
+    pageCounter[0] += 1
     start += PAGE_SIZE
     if start >= totalPages * PAGE_SIZE:
       break
@@ -278,11 +289,13 @@ def enumerateSurnames(session, filters):
 
   Unfiltered responses may be truncated and may mix record types, so they
   are only used to enumerate surnames and are NOT saved to data_raw.
+  Returns (surnames, recordsTotal of the unfiltered query).
   """
   surnames = []
   seen = set()
   start = 0
   totalPages = None
+  total = 0
   while True:
     response = fetchPage(session, filters, start, PAGE_SIZE)
     data = response.json()
@@ -304,7 +317,7 @@ def enumerateSurnames(session, filters):
     if start >= totalPages * PAGE_SIZE:
       break
     time.sleep(SLEEP_SECONDS)
-  return surnames
+  return surnames, total
 
 
 def fetchAll(filters, outputDir):
@@ -321,7 +334,7 @@ def fetchAll(filters, outputDir):
   # fetched per surname (pass 1 enumerates them, pass 2 fetches them).
   if not (filters.get('search_lastname') or filters.get('search_name')):
     print('No name/surname filter: enumerating surnames (pass 1)...')
-    surnames = enumerateSurnames(session, filters)
+    surnames, unfilteredTotal = enumerateSurnames(session, filters)
     print('Found {} unique surnames; fetching each (pass 2)...'.format(
         len(surnames)))
     pageCounter = [0]
@@ -330,7 +343,8 @@ def fetchAll(filters, outputDir):
     for surname in surnames:
       subFilters = dict(filters)
       subFilters['search_lastname'] = surname
-      rows = fetchPaged(session, subFilters, prefix, pageCounter)
+      rows = fetchPaged(session, subFilters, prefix, pageCounter,
+                        maxTotal=unfilteredTotal)
       for row in rows:
         key = recordKey(row)
         if key in seenKeys:
