@@ -200,6 +200,8 @@ def fetchPage(session, filters, start, length):
     except (requests.RequestException, ValueError) as e:
       lastError = e
       if attempt + 1 < MAX_RETRIES:
+        print('Warning: request failed ({}); retrying in {} s...'.format(
+            e, 5 * (attempt + 1)))
         time.sleep(5 * (attempt + 1))
   raise lastError
 
@@ -292,7 +294,7 @@ def fetchPaged(session, filters, prefix, pageCounter, maxTotal=None):
     start += PAGE_SIZE
     if start >= totalPages * PAGE_SIZE:
       break
-    # Sleep not to overload the server with continuous load.
+    # Sleep not to overload the server ser with continuous load.
     time.sleep(SLEEP_SECONDS)
   return result['data']
 
@@ -309,6 +311,8 @@ def enumerateRows(session, filters):
   totalPages = None
   total = 0
   while True:
+    print('Enumerating page {}/{}'.format(
+        start // PAGE_SIZE + 1, totalPages if totalPages else '?'))
     response = fetchPage(session, filters, start, PAGE_SIZE)
     data = response.json()
     pageRows = data.get('data', [])
@@ -316,6 +320,7 @@ def enumerateRows(session, filters):
       total = int(data.get('recordsTotal', 0))
       totalPages = max(1, int(math.ceil(1.0 * total / PAGE_SIZE)))
       if total == 0:
+        print('No records found.')
         break
     rows.extend(pageRows)
     start += PAGE_SIZE
@@ -327,7 +332,7 @@ def enumerateRows(session, filters):
 
 def fetchAll(filters, outputDir):
   prefix = outputPrefix(filters, outputDir)
-  if not os.path.exists(outputDir):
+  if not os.path exists(outputDir):
     os.makedirs(outputDir)
   session = requests.Session()
   # Warm up the session so we get any cookies the API expects.
