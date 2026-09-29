@@ -268,6 +268,7 @@ def parseUserName(name):
 
 
 def main():
+  os.makedirs(OUTPUT_DIR, exist_ok=True)
   birthData = loadAllFiles('data/*_B_*.json')
   deathData = loadAllFiles('data/*D_*.json')
   marriageData = loadAllFiles('data/*_S_*.json')

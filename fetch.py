@@ -14,7 +14,7 @@ GUI filter is just a GET parameter:
   lang            - pol / eng
   search_lastname - surname of the searched person
   search_name     - given name(s) of the searched person
-  search_lastname2 - second surname (mother's surname for B/D, spouse for S)
+  search_lastname2 - second surname (mother's for B/D, spouse for S)
   search_name2    - second given name(s)
   from_date       - year range start
   to_date         - year range end
@@ -23,18 +23,26 @@ GUI filter is just a GET parameter:
   parents=1       - also search by parents' names
   near=1          - also search in nearby parishes
 
-For convenience you can paste a full GUI search URL with --url and all
-filters will be extracted from it.
+API quirk: getAct.php only returns complete, correctly paginated pages of
+the right record type when a name/surname filter is active. Without such a
+filter the server truncates pages to a handful of rows, ignores pagination
+and may mix record types, and the parents columns are empty. Whole-parish
+downloads therefore work in two passes: pass 1 lists the records of the
+unfiltered query, pass 2 fetches them per surname with search_lastname
+(complete pages, correct type, parents included). Because search_lastname
+matches the surname of both spouses, one surname query covers every
+record that contains it, so pass 2 also skips already covered surnames.
 
-The raw JSON responses are saved unmodified, so every column the API
-returns (including the "stuff" column with [i] tooltips, archive info and
-scan links) is preserved for merge.py to parse.
+The raw JSON responses of pass 2 are saved unmodified, so every column
+the API returns (including the "stuff" column with [i] tooltips, archive
+info and scan links) is preserved for merge.py to parse.
 """
 
 import argparse
 import hashlib
 import math
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -56,9 +64,6 @@ FILTER_PARAMS = (
     'from_date', 'to_date',
     'exac', 'pair', 'parents', 'near',
 )
-
-# Internal Datatables parameters (pagination / sorting / search state).
-TABLE_PARAMS = ('rpp1', 'rpp2', 'ordertable', 'searchtable', 'start', 'length')
 
 
 def filtersFromUrl(url):
@@ -188,49 +193,212 @@ def fetchPage(session, filters, start, length):
       response = session.get(ACTS_URL, params=params, headers=headers,
                              timeout=30)
       response.raise_for_status()
+      # The server sometimes answers 200 with an empty (non-JSON) body,
+      # e.g. when throttling; treat that as a failed attempt and retry.
+      response.json()
       return response
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError) as e:
       lastError = e
       if attempt + 1 < MAX_RETRIES:
+        print('Warning: request failed ({}); retrying in {} s...'.format(
+            e, 5 * (attempt + 1)))
         time.sleep(5 * (attempt + 1))
   raise lastError
 
 
+def stripCellHtml(value):
+  """Returns the cell text with any icon/tooltip HTML removed."""
+  text = str(value)
+  text = re.sub(r'<img\b[^>]*>', '', text)
+  text = re.sub(r'<[^>]+>', '', text)
+  return text.strip()
+
+
+def recordKey(row):
+  """Identity of a raw record: year, number, names and surnames."""
+  return tuple(str(row[i]).strip() if i < len(row) else '' for i in range(8))
+
+
+def recordKeyNoParents(row):
+  """Identity of a record, ignoring the parents columns (4 and 7).
+
+  Pass-1 (unfiltered) rows have the parents columns empty while pass-2
+  rows have them filled, so recordKey cannot match a record across the
+  two passes; this key can.
+  """
+  return tuple(
+      str(row[i]).strip() if i < len(row) else '' for i in (0, 1, 2, 3, 5, 6))
+
+
+def fetchPaged(session, filters, prefix, pageCounter, maxTotal=None):
+  """Fetches all pages of one filtered query, saving each response 1:1.
+
+  pageCounter is a one-element list holding the next data_raw file number,
+  shared across per-surname queries. maxTotal, when given, is recordsTotal
+  of the same query without the surname filter: a filtered result can never
+  be bigger, so a page reporting more records than maxTotal is a server
+  glitch (the API intermittently ignores rid/search and answers for the
+  whole region). Glitched pages are retried and the surname is skipped if
+  the glitch persists. Returns the merged rows.
+  """
+  result = None
+  start = 0
+  totalPages = None
+  emptyWarned = False
+  glitchRetries = 0
+  while True:
+    print('Fetching {} page {}/{}'.format(
+        os.path.basename(prefix), start // PAGE_SIZE + 1,
+        totalPages if totalPages else '?'))
+    response = fetchPage(session, filters, start, PAGE_SIZE)
+    data = response.json()
+    rows = data.get('data', [])
+    total = int(data.get('recordsTotal', 0))
+    if result is None:
+      if maxTotal is not None and total > maxTotal:
+        # Server glitch: a filtered query cannot return more records
+        # than the same query without the filter. Retry before skipping.
+        if glitchRetries < MAX_RETRIES:
+          glitchRetries += 1
+          print('Warning: API reported {} records (> {} without the '
+                'surname filter); server glitch, retrying...'.format(
+                    total, maxTotal))
+          time.sleep(5 * glitchRetries)
+          continue
+        print('Warning: API keeps reporting {} records (> {}); skipping '
+              'this surname - re-run fetch.py to complete it.'.format(
+                  total, maxTotal))
+        return []
+      if not rows and total > 0 and not emptyWarned:
+        # The API sometimes returns an empty page together with
+        # recordsTotal > 0 (server-side glitch). Retry the page before
+        # giving up, so we do not silently save an empty data_raw file.
+        emptyWarned = True
+        print('Warning: API reported {} records but returned an empty '
+              'page; retrying...'.format(total))
+        time.sleep(5)
+        continue
+      result = data
+      totalPages = max(1, int(math.ceil(1.0 * total / PAGE_SIZE)))
+      if total == 0:
+        print('No records found.')
+        return []
+    else:
+      if not rows:
+        print('Warning: page at start={} returned no rows.'.format(start))
+      result['data'].extend(rows)
+    fileName = '{}_{:05d}.json'.format(prefix, pageCounter[0])
+    with open(fileName, 'w') as f:
+      f.write(response.text)
+    pageCounter[0] += 1
+    start += PAGE_SIZE
+    if start >= totalPages * PAGE_SIZE:
+      break
+    # Sleep not to overload the server with continuous load.
+    time.sleep(SLEEP_SECONDS)
+  return result['data']
+
+
+def enumerateRows(session, filters):
+  """Pass 1: fetches the unfiltered query to list all its records.
+
+  Unfiltered responses may be truncated and may mix record types, so they
+  are only used to plan pass 2 and are NOT saved to data_raw.
+  Returns (rows, recordsTotal of the unfiltered query).
+  """
+  rows = []
+  start = 0
+  totalPages = None
+  total = 0
+  while True:
+    print('Enumerating page {}/{}'.format(
+        start // PAGE_SIZE + 1, totalPages if totalPages else '?'))
+    response = fetchPage(session, filters, start, PAGE_SIZE)
+    data = response.json()
+    pageRows = data.get('data', [])
+    if totalPages is None:
+      total = int(data.get('recordsTotal', 0))
+      totalPages = max(1, int(math.ceil(1.0 * total / PAGE_SIZE)))
+      if total == 0:
+        print('No records found.')
+        break
+    rows.extend(pageRows)
+    start += PAGE_SIZE
+    if start >= totalPages * PAGE_SIZE:
+      break
+    time.sleep(SLEEP_SECONDS)
+  return rows, total
+
+
 def fetchAll(filters, outputDir):
   prefix = outputPrefix(filters, outputDir)
+  if not os.path.exists(outputDir):
+    os.makedirs(outputDir)
   session = requests.Session()
   # Warm up the session so we get any cookies the API expects.
   session.get(INDEX_URL, params={k: v for k, v in filters.items()},
               timeout=30, headers={'User-Agent': 'python-geneteka/2.0'})
 
-  length = PAGE_SIZE
-  page = 0
-  result = None
-  totalPages = None
-  while True:
-    print('Fetching {} page {}/{}'.format(
-        os.path.basename(prefix), page + 1,
-        totalPages if totalPages else '?'))
-    response = fetchPage(session, filters, page * length, length)
-    fileName = '{}_{:05d}.json'.format(prefix, page)
-    with open(fileName, 'w') as f:
-      f.write(response.text)
-    data = response.json()
-    if result is None:
-      result = data
-      total = int(data.get('recordsTotal', 0))
-      totalPages = max(1, int(math.ceil(1.0 * total / length)))
-      if total == 0:
-        print('No records found.')
-        return []
-    else:
-      result['data'].extend(data.get('data', []))
-    page += 1
-    if page >= totalPages:
-      break
-    # Sleep not to overload the server with continuous load.
-    time.sleep(SLEEP_SECONDS)
-  return result['data']
+  # Without a name/surname filter the API truncates pages, ignores
+  # pagination and returns no parents, so whole-parish downloads are
+  # fetched per surname (pass 1 lists the records, pass 2 fetches them).
+  if not (filters.get('search_lastname') or filters.get('search_name')):
+    print('No name/surname filter: enumerating records (pass 1)...')
+    pass1Rows, unfilteredTotal = enumerateRows(session, filters)
+    # search_lastname matches the surname on either side of a record, so
+    # one surname query covers every record that contain it. Index the
+    # surnames of both sides and skip a surname once all its records are
+    # fetched - one query for a frequent surname covers the rarer
+    # surnames married into it.
+    surnameToKeys = {}
+    pass1Keys = set()
+    for row in pass1Rows:
+      key = recordKeyNoParents(row)
+      pass1Keys.add(key)
+      for index in (3, 6):
+        if index >= len(row):
+          continue
+        surname = stripCellHtml(row[index])
+        if surname:
+          surnameToKeys.setdefault(surname, set()).add(key)
+    print('Found {} records with {} unique surnames; fetching per surname '
+          '(pass 2)...'.format(len(pass1Keys), len(surnameToKeys)))
+    # Most frequent surnames first: they cover the most records per query.
+    orderedSurnames = sorted(
+        surnameToKeys.items(), key=lambda item: (-len(item[1]), item[0]))
+    pageCounter = [0]
+    allRows = []
+    coveredKeys = set()
+    seenKeys = set()
+    skipCount = 0
+    for surname, keys in orderedSurnames:
+      if keys <= coveredKeys:
+        skipCount += 1
+        continue
+      subFilters = dict(filters)
+      subFilters['search_lastname'] = surname
+      rows = fetchPaged(session, subFilters, prefix, pageCounter,
+                        maxTotal=unfilteredTotal)
+      for row in rows:
+        coveredKeys.add(recordKeyNoParents(row))
+        key = recordKey(row)
+        if key in seenKeys:
+          continue
+        seenKeys.add(key)
+        allRows.append(row)
+      time.sleep(SLEEP_SECONDS)
+    print('Skipped {} surname queries whose records were already fetched.'
+          .format(skipCount))
+    uncovered = pass1Keys - coveredKeys
+    if uncovered:
+      print('Warning: {} of {} records were not returned by any surname '
+            'query (e.g. records with no surname on either side); '
+            're-running fetch.py may fetch them.'.format(
+                len(uncovered), len(pass1Keys)))
+    return allRows
+
+  pageCounter = [0]
+  return fetchPaged(session, filters, prefix, pageCounter)
 
 
 def main():

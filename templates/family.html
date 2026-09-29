@@ -14,9 +14,8 @@
     </u>
   </div>
   <div>Miejscowość: {{record.place}}</div>
-  <div>{{record.last_name_notes}}</div>
-  {% for note in record.notes %}
-    <div>{{note}}</div>
+  {% for comment in record.comments %}
+    <div>{{comment}}</div>
   {% endfor %}
   {% if record.user_entered %}
     <div>
@@ -27,8 +26,8 @@
     </div>
   {% endif %}
   <a class="btn btn-warning btn-xs" role="button" href="{{genetekaPersonUrl(record)}}" target="_blank">Geneteka</a>
-  {% if record.metryki_url %}
-    <a class="btn btn-primary btn-xs" role="button" href="{{record.metryki_url}}" target="_blank">Metryki</a>
+  {% if record.scan_url %}
+    <a class="btn btn-primary btn-xs" role="button" href="{{record.scan_url}}" target="_blank">Metryki</a>
   {% endif %}
 {% endmacro %}
 
@@ -73,8 +72,8 @@
     </div>
     <div class="list-group-item">
       <div><u>Akt małżeństwa: {{record.parish}} {{record.year}}/{{record.record_number}}</u></div>
-      {% for note in record.notes %}
-        <div>{{note}}</div>
+      {% for comment in record.comments %}
+        <div>{{comment}}</div>
       {% endfor %}
       {% if record.user_entered %}
       <div>
@@ -90,6 +89,14 @@
          target="_blank">
         Geneteka
       </a>
+      {% if record.scan_url %}
+      <a class="btn btn-primary btn-xs"
+         role="button"
+         href="{{record.scan_url}}"
+         target="_blank">
+        Metryki
+      </a>
+      {% endif %}
     </div>
   </div>
 

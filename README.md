@@ -51,19 +51,56 @@ o archiwum (z.png) i odnośnikiem do skanu (s.png → metryki.genealodzy.pl).
 Jeśli użyto filtrów wyszukiwania, nazwa pliku zawiera dodatkowy
 8-znakowy znacznik zapytania, więc wyniki różnych kwerend nie mieszają się.
 
+### Pobieranie całej parafii (dwuprzebiegowe)
+
+API `getAct.php` zwraca kompletne, poprawnie stronicowane strony z rodzicami
+**tylko wtedy, gdy aktywny jest filtr imienia lub nazwiska**. Bez filtra
+serwer ucina strony do kilku wierszy, ignoruje paginację i pomija kolumny
+rodziców. Dlatego kwerenda całej parafii (bez `search_lastname`/
+`search_name`) działa dwuprzebiegowo:
+
+1. **Przebieg 1** — lista rekordów parafii (niezapisywana do `data_raw`,
+   bo odpowiedzi bez filtra mogą mieszać księgi i są ucięte);
+2. **Przebieg 2** — pobranie per nazwisko z `search_lastname` (kompletne
+   strony, rodzice uwzględnieni), zapis 1:1 do `data_raw`.
+
+`search_lastname` pasuje do nazwiska pana **lub** pani młodej, więc jedno
+zapytanie pokrywa każdy rekord zawierający dane nazwisko. Przebieg 2
+porządkuje nazwiska od najczęstszych i pomija te, których rekordy są już
+pobrane — dla Zręcina S: 416 unikalnych nazwisk → 116 kwerend (72% mniej
+zapytań).
+
+Ten sam rekord może więc trafić do kilku plików `data_raw`; `merge.py`
+deduplikuje wiersze po kluczu rekordu, zachowując wersję z największą
+liczbą wypełnionych kolumn (tę z rodzicami).
+
+Znane ograniczenia API (obsługiwane automatycznie):
+- sporadycznie zwracana jest pusta strona mimo `recordsTotal > 0` — strona
+  jest wtedy ponawiana;
+- po serii szybkich zapytań serwer chwilowo throttluje (puste odpowiedzi
+  200) — fetch.py czeka i ponawia zapytanie;
+- czasem API ignoruje `rid`/filtr i zwraca wyniki dla **całego
+  województwa** (zawyżony `recordsTotal`). Przebieg 2 porównuje totał
+  każdej kwerendy nazwiska z totałem kwerendy bez filtra — wynik większy
+  niż totał bez filtra to matematycznie niemożliwy glitch; nazwisko jest
+  wtedy ponawiane, a jeśli glitch się utrzymuje, pomijane z ostrzeżeniem
+  (ponowne uruchomienie fetch.py je dorobi);
+- dla małych parafii pewność kompletności daje też pobranie wąskich
+  zakresów rocznych (`from_date`/`to_date`).
+
 2. Wstępnie przetworzenie danych
 
 ```
 python merge.py
 ```
 
-merge.py parsuje teraz ws
-zystkie kolumny każdego wiersza:
-- uwagi z ikon [i] w dowolnej kolumnie (`comments`/`notes`),
+merge.py parsuje wszystkie kolumny każdego wiersza:
+- uwagi z ikon [i] w dowolnej kolumnie (`comments`),
 - informację o archiwum i link do archiwum (`archives`, `archives_url`),
-- odnośnik do skanu, jeśli jest dostępny (`scan_urls`/`metryki_url`),
+- odnośnik do skanu, jeśli jest dostępny (`scan_url`),
 - użytkownika, który zaindeksował akt (`user_entered`),
-- pełny surowy wiersz (`raw_columns`).
+- deduplikację wierszy (ten sam akt z różnych kwerend → jeden rekord,
+  preferowana wersja z rodzicami).
 
 3. Wygenerowanie plików HTML
 
@@ -77,10 +114,10 @@ Rekordy w `data/*.json` zawierają następujące pola wyciągane z ikon w kolumn
 
 | Klucz | Źródło | Obecność |
 |---|---|---|
-| `comments` / `notes` | `title` ikony `i.png` (wszystkie kolumny, podział po \r) | gdy są uwagi |
+| `comments` | `title` ikony `i.png` (wszystkie kolumny, podział po \r, deduplikacja) | gdy są uwagi |
 | `archives` | `title` ikony `z.png` | gdy podano miejsce przechowywania |
 | `archives_url` | `href` linku otaczającego `z.png` | gdy archiwum ma stronę WWW |
-| `scan_urls` / `scan_url` / `metryki_url` | `href` linku otaczającego `s.png` | gdy dostępny jest skan |
+| `scan_url` | `href` linku otaczającego `s.png` | gdy dostępny jest skan |
 | `user_entered` | parametr `uname=` w linku przy `a.png` | gdy podano indeksującego |
 
 Klucze `archives_url` i `scan_url` są **całkowicie pomijane**, gdy dany rekord nie ma
